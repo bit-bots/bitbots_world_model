@@ -8,12 +8,14 @@ from dynamic_reconfigure.server import Server
 from filterpy.common import Q_discrete_white_noise
 from filterpy.kalman import KalmanFilter
 from geometry_msgs.msg import (PoseWithCovarianceStamped,
+                               PoseStamped,
                                TwistWithCovarianceStamped)
 from humanoid_league_msgs.msg import (PoseWithCertainty,
                                       PoseWithCertaintyArray,
                                       PoseWithCertaintyStamped)
 from std_msgs.msg import Header
 from std_srvs.srv import Trigger
+from sensor_msgs.msg import CameraInfo
 from tf2_geometry_msgs import PointStamped
 
 from bitbots_ball_filter.cfg import BallFilterConfig
@@ -48,9 +50,10 @@ class BallFilter:
         self.ball = None  # type: PointStamped
         self.ball_header = None  # type: Header
         self.last_ball_msg = PoseWithCertainty()  # type: PoseWithCertainty
+        self.ball_should_be_visible_counter = 0
+        self.camera_info = None
 
         self.filter_rate = config['filter_rate']
-        self.min_ball_confidence = config['min_ball_confidence']
         self.measurement_certainty = config['measurement_certainty']
         self.filter_time_step = 1.0 / self.filter_rate
         self.filter_reset_duration = rospy.Duration(secs=config['filter_reset_time'])
@@ -90,13 +93,20 @@ class BallFilter:
         )
 
         # setup subscriber
-        self.subscriber = rospy.Subscriber(
+        self.ball_subscriber = rospy.Subscriber(
             config['ball_subscribe_topic'],
             PoseWithCertaintyArray,
             self.ball_callback,
             queue_size=1
         )
-        
+
+        self.camera_info_subscriber = rospy.Subscriber(
+            config['camera_info_subscribe_topic'],
+            CameraInfo,
+            self.camera_info_callback,
+            queue_size=1
+        )
+
         self.reset_service = rospy.Service(
             config['ball_filter_reset_service_name'],
             Trigger,
@@ -107,14 +117,21 @@ class BallFilter:
         self.filter_timer = rospy.Timer(rospy.Duration(self.filter_time_step), self.filter_step)
         return config
 
+    def camera_info_callback(self, msg: CameraInfo):
+        """handles incoming ball messages"""
+        self.camera_info = msg
+
     def ball_callback(self, msg: PoseWithCertaintyArray):
         """handles incoming ball messages"""
         if msg.poses:
+            # Ball was visible so reset counter
+            self.ball_should_be_visible_counter = 0
+            rospy.loginfo("I saw the ball :D")
+
+            # Sort balls
             balls = sorted(msg.poses, reverse=True, key=lambda ball: ball.confidence)  # Sort all balls by confidence
             ball = balls[0]  # Ball with highest confidence
 
-            if ball.confidence < self.min_ball_confidence:
-                return
             self.last_ball_msg = ball
             ball_buffer = PointStamped(msg.header, ball.pose.pose.position)
             try:
@@ -122,6 +139,55 @@ class BallFilter:
                 self.ball_header = msg.header
             except (tf2.ConnectivityException, tf2.LookupException, tf2.ExtrapolationException) as e:
                 rospy.logwarn(e)
+        else:
+            # Check if we should be able to see the ball
+            if self.ball_should_be_visible():
+                rospy.logerr("Should be able to see the ball but no...")
+                # Increase a counter for the grace period
+                self.ball_should_be_visible_counter += 1
+                # If we should be able to see the ball for n steps but don't reset the filter
+                if self.ball_should_be_visible_counter > 5:
+                    # Reset and counter
+                    self.reset_filter_cb(None)
+                    self.ball_should_be_visible_counter = 0
+                    rospy.logerr("I definetly lost the ball here...")
+            else:
+                #self.ball_should_be_visible_counter = 0
+                rospy.loginfo("Its okay not seeing the ball here")
+
+
+    def ball_should_be_visible(self):
+        """
+        Calculates if a ball should be currently visible
+        """
+        # Check if we got a camera info to do this stuff
+        if self.camera_info is None:
+            rospy.logwarn("No camera info recived. Not checking if the ball is currently visible.")
+            return False
+
+        # Get ball filter state
+        state, cov_mat = self.kf.get_update()
+
+        # Build a pose
+        ball_pose = PoseStamped()
+        ball_pose.header.frame_id = self.filter_frame
+        ball_pose.header.stamp = rospy.Time.now()
+        ball_pose.pose.position.x = state[0]
+        ball_pose.pose.position.y = state[1]
+
+        # Transform to camera frame
+        ball_in_camera_optical_frame = self.tf_buffer.transform(ball_pose, self.camera_info.header.frame_id, timeout=rospy.Duration(0.5))
+        # Check if the ball is in front of the camera
+        if ball_in_camera_optical_frame.pose.position.z >= 0:
+            # Quick math to get the pixels
+            p = [ball_in_camera_optical_frame.pose.position.x, ball_in_camera_optical_frame.pose.position.y, ball_in_camera_optical_frame.pose.position.z]
+            k = np.reshape(self.camera_info.K, (3,3))
+            p_pixel = np.matmul(k, p)
+            p_pixel = p_pixel * (1/p_pixel[2])
+            # Make sure that the transformed pixel is inside the resolution and positive.
+            if 0 < p_pixel[0] <= self.camera_info.width and 0 < p_pixel[1] <= self.camera_info.height:
+                return True
+        return False
 
     def reset_filter_cb(self, req):
         rospy.loginfo("Resetting bitbots ball filter...", logger_name="ball_filter")
@@ -148,7 +214,7 @@ class BallFilter:
             self.publish_data(*state)
             self.last_state = state
             self.ball = None
-        else: 
+        else:
             if self.filter_initialized:
                 if (rospy.Time.now() - self.ball_header.stamp) > self.filter_reset_duration:
                     self.filter_initialized = False
