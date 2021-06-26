@@ -54,7 +54,6 @@ class BallFilter:
         self.camera_info = None
 
         self.filter_rate = config['filter_rate']
-        self.min_ball_confidence = config['min_ball_confidence']
         self.measurement_certainty = config['measurement_certainty']
         self.filter_time_step = 1.0 / self.filter_rate
         self.filter_reset_duration = rospy.Duration(secs=config['filter_reset_time'])
@@ -132,9 +131,6 @@ class BallFilter:
             # Sort balls
             balls = sorted(msg.poses, reverse=True, key=lambda ball: ball.confidence)  # Sort all balls by confidence
             ball = balls[0]  # Ball with highest confidence
-
-            if ball.confidence < self.min_ball_confidence:
-                return
 
             self.last_ball_msg = ball
             ball_buffer = PointStamped(msg.header, ball.pose.pose.position)
