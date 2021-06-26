@@ -1,5 +1,6 @@
 # Topics
 ball_subscribe_topic: 'balls_relative'
+camera_info_subscribe_topic: 'camera/camera_info'
 ball_position_publish_topic: 'ball_position_relative_filtered'
 ball_movement_publish_topic: 'ball_relative_movement'
 ball_publish_topic: 'ball_relative_filtered'
