@@ -107,10 +107,52 @@ class BallFilter:
         self.filter_timer = rospy.Timer(rospy.Duration(self.filter_time_step), self.filter_step)
         return config
 
+    def ball_callback2(self, msg: PoseWithCertaintyArray, optional_distance = True):
+        """handles incoming ball messages"""
+        if optional_distance:
+            if msg.poses:
+                balls = [ball for ball in msg.poses if ball.confidence > self.min_ball_confidence]#only look at balls who have at least some minimal certainty
+                
+                if not balls: #if there are not any balls with a high enough confidence
+                    return
+                for ball in balls:
+                    last_distance = 5 #we need a number that is rather hihg, I do not know how to chose that properly
+                    if(self.calc_distance_between_balls(ball, msg.header)< last_distance):
+                        last_distance = self.calc_distance_between_balls(ball, msg.header)
+                        self.last_ball_msg = ball
+                        ball_buffer = PointStamped()
+                        ball_buffer.header = msg.header
+                        ball_buffer.point = ball.pose.pose.position
+                try:
+                    self.ball = self.tf_buffer.transform(ball_buffer, self.filter_frame, timeout=rclpy.duration.Duration(seconds=0.3))
+                    self.ball_header = msg.header
+                except (tf2.ConnectivityException, tf2.LookupException, tf2.ExtrapolationException) as e:
+                    self.get_logger().warning(str(e))
+        else:
+            self.ball_callback(msg)
+
+    def calc_distance_between_balls(self, possible_ball, header): #self.ball ist doch der letzte Ball?
+        #muss ich die anderen Bälle auch noch transofrmieren? Oder kann ich den letzten Ball aus dem Buffer nehmen?
+        #wie ordne ich sie denn überhaupt nach der Entfernung? Kann ich da ein Attribut anhängen
+        #oder ich nehme einfach das minimale und update das?
+        #Das ist alles nicht so effektiv weil alles 3 mal gemacht wird gefühlt
+        
+        self.last_ball_msg = possible_ball
+        ball_buffer = PointStamped()
+        ball_buffer.header = header
+        ball_buffer.point = possible_ball.pose.pose.position
+        try:
+            self.ball = self.tf_buffer.transform(ball_buffer, self.filter_frame, timeout=rclpy.duration.Duration(seconds=0.3))
+            self.ball_header = header
+        except (tf2.ConnectivityException, tf2.LookupException, tf2.ExtrapolationException) as e:
+            self.get_logger().warning(str(e))
+
+
     def ball_callback(self, msg: PoseWithCertaintyArray):
         """handles incoming ball messages"""
         if msg.poses:
             balls = sorted(msg.poses, reverse=True, key=lambda ball: ball.confidence)  # Sort all balls by confidence
+            
             ball = balls[0]  # Ball with highest confidence
 
             if ball.confidence < self.min_ball_confidence:
