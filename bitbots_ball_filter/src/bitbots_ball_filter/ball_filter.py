@@ -137,15 +137,18 @@ class BallFilter:
         #oder ich nehme einfach das minimale und update das?
         #Das ist alles nicht so effektiv weil alles 3 mal gemacht wird gefühlt
         
-        self.last_ball_msg = possible_ball
+        #self.last_ball_msg = possible_ball
         ball_buffer = PointStamped()
         ball_buffer.header = header
         ball_buffer.point = possible_ball.pose.pose.position
         try:
-            self.ball = self.tf_buffer.transform(ball_buffer, self.filter_frame, timeout=rclpy.duration.Duration(seconds=0.3))
-            self.ball_header = header
+
+            possible_ball_transform = self.tf_buffer.transform(ball_buffer, self.filter_frame, timeout=rclpy.duration.Duration(seconds=0.3))
+            return math.sqrt((possible_ball_transform.point.x -self.ball.point.x)**2 +(possible_ball_transform.point.x -self.ball.point.x)**2) #haben wir überhaupt einen ball
+            #self.ball_header = header // we do not need this to compare?
         except (tf2.ConnectivityException, tf2.LookupException, tf2.ExtrapolationException) as e:
             self.get_logger().warning(str(e))
+            return None #or should it be a high number?
 
 
     def ball_callback(self, msg: PoseWithCertaintyArray):
