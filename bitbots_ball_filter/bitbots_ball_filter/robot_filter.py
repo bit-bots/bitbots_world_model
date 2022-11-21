@@ -102,9 +102,34 @@ class ObjectFilter(Node):
 
     def init_filter(self, x: float, y: float) -> None:
         # how do we deal with the multiple filters
+        self.kf.x = np.array([x, y, 0, 0]) # initial position of ball + velocity in x and y direction???
+
+        # transition matrix?
+        self.kf.F = np.array([[1.0, 0.0, 1.0, 0.0],
+                              [0.0, 1.0, 0.0, 1.0],
+                              [0.0, 0.0, self.velocity_factor, 0.0],
+                              [0.0, 0.0, 0.0, self.velocity_factor]
+                              ])
+
+        # measurement function
+        self.kf.H = np.array([[1.0, 0.0, 0.0, 0.0],
+                              [0.0, 1.0, 0.0, 0.0]
+                              ])
+
+        # multiplying by the initial uncertainty
+        self.kf.P = np.array([[1, 0],
+                              [0, 1]
+                              ]) * self.measurement_uncertainty
+
+        # assigning process noise todo what does this mean
+        self.kf.Q = Q_discrete_white_noise(dim=2, dt=self.filter_time_step, var=self.process_noise_variance,
+                                           block_size=2, order_by_dim=False)
+
+        self.filter_initialized = True
         pass
 
     def publish_data(self, state_vec: np.array, cov_mat: np.array) -> None:
+        # look at how its done in the objectsim
         pass
 
 def main(args=None) -> None:
