@@ -18,31 +18,12 @@ from rcl_interfaces.msg import SetParametersResult
 from geometry_msgs.msg import Point, PoseWithCovarianceStamped, TwistWithCovarianceStamped
 from tf2_geometry_msgs import PointStamped
 from humanoid_league_msgs.msg import PoseWithCertaintyStamped
-from soccer_vision_3d_msgs.msg import BallArray, Ball
+from soccer_vision_3d_msgs.msg import RobotArray, Robot
 
 
-class BallWrapper():
-    def __init__(self, position, header, confidence):
-        self.position = position
-        self.header = header
-        self.confidence = confidence
-
-    def get_header(self):
-        return self.header
-
-    def get_position(self):
-        return self.position
-    
-    def get_confidence(self):
-        return self.confidence
-
-
-class BallFilter(Node):
+class ObjectFilter(Node):
     def __init__(self) -> None:
-        """
-        creates Kalmanfilter and subscribes to messages which are needed
-        """
-        super().__init__("ball_filter", automatically_declare_parameters_from_overrides=True)
+        super().__init__("robot_filter", automatically_declare_parameters_from_overrides=True)
         self.logger = self.get_logger()
         self.tf_buffer = tf2.Buffer(cache_time=rclpy.duration.Duration(seconds=2))
         self.tf_listener = tf2.TransformListener(self.tf_buffer, self)
@@ -52,15 +33,17 @@ class BallFilter(Node):
         self._dynamic_reconfigure_callback(self.get_parameters_by_prefix("").values())
 
     def _dynamic_reconfigure_callback(self, config) -> SetParametersResult:
+        # construct config from the params:
         tmp_config = deepcopy(self.config)
         for param in config:
             tmp_config[param.name] = param.value
         config = tmp_config
-        # creates kalmanfilter with 4 dimensions
+
+        # create Kalman filter:
         self.kf = KalmanFilter(dim_x=4, dim_z=2, dim_u=0)
         self.filter_initialized = False
-        self.ball = None  # type: BallWrapper
-        self.last_ball_stamp = None
+        self.robot = None  # type: RobotWrapper
+        self.last_robot_stamp = None
 
         self.filter_rate = config['filter_rate']
         self.measurement_certainty = config['measurement_certainty']
@@ -74,131 +57,128 @@ class BallFilter(Node):
             self.filter_frame = config['odom_frame']
         elif filter_frame == "map":
             self.filter_frame = config['map_frame']
-        self.logger.info(f"Using frame '{self.filter_frame}' for ball filtering")
+        self.logger.info(f"Using frame '{self.filter_frame}' for robot filtering")
 
-        # adapt velocity factor to frequency
+        # adapt velocity factor to frequency#todo whats this OWW
         self.velocity_factor = (1 - config['velocity_reduction']) ** (1 / self.filter_rate)
         self.process_noise_variance = config['process_noise_variance']
 
-        # publishes positions of ball
-        self.ball_pose_publisher = self.create_publisher(
+        # setup publishers and subscribers:
+
+        #todo what other attributes for the robot would need to be published:
+
+        # publishes positions of robots:
+        self.robot_pose_publisher = self.create_publisher(
             PoseWithCovarianceStamped,
-            config['ball_position_publish_topic'],
+            config['robot_position_publish_topic'],
             1
         )
-
-        # publishes velocity of ball
-        self.ball_movement_publisher = self.create_publisher(
+        # publishes velocity of robots:
+        self.robot_movement_publisher = self.create_publisher(
             TwistWithCovarianceStamped,
-            config['ball_movement_publish_topic'],
+            config['robot_movement_publish_topic'],
             1
         )
-
-        # publishes ball
-        self.ball_publisher = self.create_publisher(
+        # publishes robots:
+        self.robot_publisher = self.create_publisher(
             PoseWithCertaintyStamped,
-            config['ball_publish_topic'],
+            config['robot_publish_topic'],
             1
         )
-
-        # setup subscriber
+        # setup robot subscriber:
         self.subscriber = self.create_subscription(
-            BallArray,
-            config['ball_subscribe_topic'],
-            self.ball_callback,
+            RobotArray,
+            config['robot_subscribe_topic'],
+            self.robot_callback,
             1
         )
-
+        #todo what is this?
         self.reset_service = self.create_service(
             Trigger,
-            config['ball_filter_reset_service_name'],
+            config['robot_filter_reset_service_name'],
             self.reset_filter_cb
         )
 
+        #todo why:
         self.config = config
         self.filter_timer = self.create_timer(self.filter_time_step, self.filter_step)
         return SetParametersResult(successful=True)
 
     def reset_filter_cb(self, req, response) -> Tuple[bool, str]:
-        self.logger.info("Resetting bitbots ball filter...")
+        self.logger.info("Resetting bitbots robot filter...")
         self.filter_initialized = False
         response.success = True
         return response
 
-    def ball_callback(self, msg: BallArray) -> None:
-        if msg.balls:  # Balls exist
-            # Either select ball closest to previous prediction or with highest confidence
-            if self.closest_distance_match:  # Select ball closest to previous prediction
-                ball_msg = self._get_closest_ball_to_previous_prediction(msg)
-            else:  # Select ball with highest confidence
-                ball_msg = sorted(msg.balls, key=lambda ball: ball.confidence.confidence)[-1]
-            
-            # A ball measurement was selected, now we save it for the next filter step
-            position = self._get_transform(msg.header, ball_msg.center)
-            if position is not None:
-                self.ball = BallWrapper(position, msg.header, ball_msg.confidence.confidence)
 
-    def _get_closest_ball_to_previous_prediction(self, ball_array: BallArray) -> Union[Ball, None]:
+    def robot_callback(self, msg: RobotArray) -> None:
+        """
+        Assigns each detected robot to existing or new filter
+        #todo the original just decides which ball to take since it doesnt need to assign filters
+        #todo so do I already assign filters here or later?
+
+        :param robot_msg: List of robot-detections
+        """
+        if msg.robots:
+            if self.closest_distance_match:  # Select robot closest to previous prediction
+                robot_msg = self._get_closest_robot_to_previous_prediction(msg)
+            else:
+                robot_msg = sorted(msg.robots, key=lambda robot: robot.confidence.confidence)[-1]
+
+            position = self._get_transform(msg.header, robot_msg.bb.center)
+            if position is not None:
+                self.robot = RobotWrapper(position, msg.header, robot_msg.confidence.confidence)
+
+    def _get_closest_robot_to_previous_prediction(self, robot_array: RobotArray) -> Union[Robot, None]:
         closest_distance = math.inf
-        closest_ball_msg = ball_array.balls[0]
-        for ball_msg in ball_array.balls:
-            ball_transform = self._get_transform(ball_array.header, ball_msg.center)
-            if ball_transform and self.ball:
+        closest_robot_msg = robot_array.robots[0]
+        for robot_msg in robot_array.robots:
+            robot_transform = self._get_transform(robot_array.header, robot_msg.bb.center)
+            if robot_transform and self.robot:
                 distance = math.dist(
-                    (ball_transform.point.x, ball_transform.point.y),
-                    (self.ball.get_position().point.x, self.ball.get_position().point.y))
+                    (robot_transform.point.x, robot_transform.point.y),
+                    (self.robot.get_position().point.x, self.robot.get_position().point.y))
                 if distance < closest_distance:
-                    closest_ball_msg  = ball_msg
-        return closest_ball_msg
+                    closest_robot_msg = robot_msg
+        return closest_robot_msg
 
     def _get_transform(self,
-            header: Header,
-            point: Point,
-            frame: Union[None, str] = None,
-            timeout: float = 0.3) -> Union[PointStamped, None]:
-        if frame is None:
-            frame = self.filter_frame
-
-        point_stamped = PointStamped()
-        point_stamped.header = header
-        point_stamped.point = point
-        try:
-            return self.tf_buffer.transform(point_stamped, frame, timeout=rclpy.duration.Duration(seconds=timeout))
-        except (tf2.ConnectivityException, tf2.LookupException, tf2.ExtrapolationException) as e:
-            self.logger.warning(str(e))
+                       header: Header,
+                       point: Point,
+                       frame: Union[None, str] = None,
+                       timeout: float = 0.3) -> Union[PointStamped, None]:
+        # todo
+        pass
 
     def filter_step(self) -> None:
-        """"
-        When ball has been assigned a value and filter has been initialized:
-        State will be updated according to filter.
-        If filter has not been initialized, then that will be done first.
-
-        If there is no data for ball, a prediction will still be made and published
-        Process noise is taken into account
-        """
-        if self.ball:  # Ball measurement exists
+        pass
+    #todo (because we only do it whne we have a measurement anyway) why is the original filter step done with a timer and not every time you get a new measurement?
+    #todo explain that in paper
+        if self.robot:  # Robot measurement exists
             # Reset filter, if distance between last prediction and latest measurement is too large
-            distance_to_ball = math.dist(
-                (self.kf.get_update()[0][0], self.kf.get_update()[0][1]), self.get_ball_measurement())
-            if self.filter_initialized and distance_to_ball > self.filter_reset_distance:
+            distance_to_robot = math.dist(
+                (self.kf.get_update()[0][0], self.kf.get_update()[0][1]), self.get_robot_measurement())
+            if self.filter_initialized and distance_to_robot > self.filter_reset_distance:
                 self.filter_initialized = False
-                self.logger.info(f"Reset filter! Reason: Distance to ball {distance_to_ball} > {self.filter_reset_distance} (filter_reset_distance)")
+                self.logger.info(
+                    f"Reset filter! Reason: Distance to robot {distance_to_robot} > {self.filter_reset_distance} (filter_reset_distance)")
             # Initialize filter if not already
             if not self.filter_initialized:
-                self.init_filter(*self.get_ball_measurement())
+                self.init_filter(*self.get_robot_measurement())
             # Predict and publish
             self.kf.predict()
-            self.kf.update(self.get_ball_measurement())
+            self.kf.update(self.get_robot_measurement())
             self.publish_data(*self.kf.get_update())
-            self.last_ball_stamp = self.ball.get_header().stamp
-            self.ball = None  # Clear handled measurement
-        else:  # No new ball measurement to handle
+            self.last_robot_stamp = self.robot.get_header().stamp
+            self.robot = None  # Clear handled measurement
+        else:  # No new robot measurement to handle
             if self.filter_initialized:
                 # Reset filer,if last measurement is too old
-                age = self.get_clock().now() - rclpy.time.Time.from_msg(self.last_ball_stamp)
-                if not self.last_ball_stamp or age > self.filter_reset_duration:
+                age = self.get_clock().now() - rclpy.time.Time.from_msg(self.last_robot_stamp)
+                if not self.last_robot_stamp or age > self.filter_reset_duration:
                     self.filter_initialized = False
-                    self.logger.info(f"Reset filter! Reason: Latest ball is too old {age} > {self.filter_reset_duration} (filter_reset_duration)")
+                    self.logger.info(
+                        f"Reset filter! Reason: Latest robot is too old {age} > {self.filter_reset_duration} (filter_reset_duration)")
                     return
                 # Empty update, as no new measurement available (and not too old)
                 self.kf.predict()
@@ -209,47 +189,43 @@ class BallFilter(Node):
                 huge_cov_mat = np.eye(cov_mat.shape[0]) * 10
                 self.publish_data(state_vec, huge_cov_mat)
 
-    def get_ball_measurement(self) -> Tuple[float, float]:
-        """extracts filter measurement from ball message"""
-        return self.ball.get_position().point.x, self.ball.get_position().point.y
+
+    def get_robot_measurement(self) -> Tuple[float, float]:
+        """extracts filter measurement from robot message"""
+        return self.robot.get_position().point.x, self.robot.get_position().point.y
 
     def init_filter(self, x: float, y: float) -> None:
-        """
-        Initializes kalmanfilter at given position
+        #todo look up what these things mean and put them in the text
 
-        :param x: start x position of the ball
-        :param y: start y position of the ball
-        """
-        # initial value of position(x,y) of the ball and velocity
-        self.kf.x = np.array([x, y, 0, 0])
+        # how do we deal with the multiple filters
+        self.kf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
 
-        # transition matrix
+        # transition matrix?
         self.kf.F = np.array([[1.0, 0.0, 1.0, 0.0],
                               [0.0, 1.0, 0.0, 1.0],
                               [0.0, 0.0, self.velocity_factor, 0.0],
-                              [0.0, 0.0, 0.0, self.velocity_factor]])
+                              [0.0, 0.0, 0.0, self.velocity_factor]
+                              ])
+
         # measurement function
         self.kf.H = np.array([[1.0, 0.0, 0.0, 0.0],
-                              [0.0, 1.0, 0.0, 0.0]])
+                              [0.0, 1.0, 0.0, 0.0]
+                              ])
+
         # multiplying by the initial uncertainty
-        self.kf.P = np.eye(4) * 1000
+        self.kf.P = np.array([[1, 0],
+                              [0, 1]
+                              ]) * self.measurement_uncertainty
 
-        # assigning measurement noise
-        self.kf.R = np.array([[1, 0],
-                              [0, 1]]) * self.measurement_certainty
-
-        # assigning process noise
+        # assigning process noise todo what does this mean
         self.kf.Q = Q_discrete_white_noise(dim=2, dt=self.filter_time_step, var=self.process_noise_variance,
                                            block_size=2, order_by_dim=False)
 
         self.filter_initialized = True
+        pass
 
     def publish_data(self, state_vec: np.array, cov_mat: np.array) -> None:
-        """
-        Publishes ball position and velocity to ros nodes
-        :param state_vec: current state of kalmanfilter
-        :param cov_mat: current covariance matrix
-        """
+        # todo look at how its done in the objectsim
         header = Header()
         header.frame_id = self.filter_frame
         header.stamp = rclpy.time.Time.to_msg(self.get_clock().now())
@@ -270,7 +246,7 @@ class BallFilter(Node):
         pose_msg.pose.pose.position = point_msg
         pose_msg.pose.covariance = pos_covariance
         pose_msg.pose.pose.orientation.w = 1.0
-        self.ball_pose_publisher.publish(pose_msg)
+        self.robot_pose_publisher.publish(pose_msg)
 
         # velocity
         movement_msg = TwistWithCovarianceStamped()
@@ -282,22 +258,22 @@ class BallFilter(Node):
         movement_msg.twist.covariance[1] = float(cov_mat[2][3])
         movement_msg.twist.covariance[6] = float(cov_mat[3][2])
         movement_msg.twist.covariance[7] = float(cov_mat[3][3])
-        self.ball_movement_publisher.publish(movement_msg)
+        self.robot_movement_publisher.publish(movement_msg)
 
-        # ball
-        ball_msg = PoseWithCertaintyStamped()
-        ball_msg.header = header
-        ball_msg.pose.pose.pose.position = point_msg
-        ball_msg.pose.pose.covariance = pos_covariance
-        ball_msg.pose.confidence = self.ball.get_confidence() if self.ball else 0.0
-        self.ball_publisher.publish(ball_msg)
-
+        # robot
+        robot_msg = PoseWithCertaintyStamped()
+        robot_msg.header = header
+        robot_msg.pose.pose.pose.position = point_msg
+        robot_msg.pose.pose.covariance = pos_covariance
+        robot_msg.pose.confidence = self.robot.get_confidence() if self.robot else 0.0
+        self.robot_publisher.publish(robot_msg)
 
 def main(args=None) -> None:
     rclpy.init(args=args)
-    node = BallFilter()
+    node = ObjectFilter()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.destroy_node()
         rclpy.shutdown()
+

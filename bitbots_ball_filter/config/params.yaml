@@ -31,3 +31,11 @@ bitbots_ball_filter:
 
     # True if ball should be selected based on distance to filtered ball instead of highest rating
     closest_distance_match: True
+
+    # robot filter parameters:
+    robot_subscribe_topic: 'robots_relative'
+    robot_position_publish_topic: 'robot_position_relative_filtered'
+    robot_movement_publish_topic: 'robot_relative_movement'
+    robot_publish_topic: 'robot_relative_filtered'
+
+    robot_filter_reset_service_name: 'robot_filter_reset'
