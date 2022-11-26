@@ -1,19 +1,19 @@
-#! /usr/bin/env python3
 import optuna
-from subprocess import call
-print(call(["source ~/colcon_ws/install/setup.bash"]))
-print(call(["ros2 node list"]))
+import subprocess
+import os
+
 
 def objective(trial):
-    x = trial.suggest_float("x", 1, 10)
+    x = trial.suggest_int("x", 1, 10)
     print(x)
 
-    call(["ros2 param set /bitbots_ball_filter filter_reset_distance", str(x)])
-    return x
+    os.system("ros2 param set /bitbots_ball_filter filter_reset_distance " + str(x))
+    print("ros2 param set /bitbots_ball_filter filter_reset_distance " + str(x))
+    return os.system("ros2 param get /bitbots_ball_filter filter_reset_distance")
 
 
 study = optuna.create_study()
-study.optimize(objective, n_trials=100)
+study.optimize(objective, n_trials=3)
 
 best_params = study.best_params
 found_x = best_params["x"]
