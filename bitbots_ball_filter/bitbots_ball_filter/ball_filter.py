@@ -20,6 +20,21 @@ from tf2_geometry_msgs import PointStamped
 from humanoid_league_msgs.msg import PoseWithCertaintyStamped
 from soccer_vision_3d_msgs.msg import RobotArray, Robot
 
+class RobotWrapper():
+    #todo  what does this do
+    def __init__(self, position, header, confidence):
+        self.position = position
+        self.header = header
+        self.confidence = confidence
+
+    def get_header(self):
+        return self.header
+
+    def get_position(self):
+        return self.position
+
+    def get_confidence(self):
+        return self.confidence
 
 class ObjectFilter(Node):
     def __init__(self) -> None:
@@ -68,7 +83,7 @@ class ObjectFilter(Node):
         #todo what other attributes for the robot would need to be published:
 
         # publishes positions of robots:
-        self.robot_pose_publisher = self.create_publisher(
+        self.robot_position_publisher = self.create_publisher(
             PoseWithCovarianceStamped,
             config['robot_position_publish_topic'],
             1
@@ -119,13 +134,14 @@ class ObjectFilter(Node):
 
         :param robot_msg: List of robot-detections
         """
+
         if msg.robots:
+            # todo this
             if self.closest_distance_match:  # Select robot closest to previous prediction
                 robot_msg = self._get_closest_robot_to_previous_prediction(msg)
             else:
                 robot_msg = sorted(msg.robots, key=lambda robot: robot.confidence.confidence)[-1]
-
-            position = self._get_transform(msg.header, robot_msg.bb.center)
+            position = self._get_transform(msg.header, robot_msg.bb.center.position)
             if position is not None:
                 self.robot = RobotWrapper(position, msg.header, robot_msg.confidence.confidence)
 
@@ -133,7 +149,7 @@ class ObjectFilter(Node):
         closest_distance = math.inf
         closest_robot_msg = robot_array.robots[0]
         for robot_msg in robot_array.robots:
-            robot_transform = self._get_transform(robot_array.header, robot_msg.bb.center)
+            robot_transform = self._get_transform(robot_array.header, robot_msg.bb.center.position)
             if robot_transform and self.robot:
                 distance = math.dist(
                     (robot_transform.point.x, robot_transform.point.y),
@@ -148,10 +164,18 @@ class ObjectFilter(Node):
                        frame: Union[None, str] = None,
                        timeout: float = 0.3) -> Union[PointStamped, None]:
         # todo
-        pass
+        if frame is None:
+            frame = self.filter_frame
+
+        point_stamped = PointStamped()
+        point_stamped.header = header
+        point_stamped.point = point
+        try:
+            return self.tf_buffer.transform(point_stamped, frame, timeout=rclpy.duration.Duration(seconds=timeout))
+        except (tf2.ConnectivityException, tf2.LookupException, tf2.ExtrapolationException) as e:
+            self.logger.warning(str(e))
 
     def filter_step(self) -> None:
-        pass
     #todo (because we only do it whne we have a measurement anyway) why is the original filter step done with a timer and not every time you get a new measurement?
     #todo explain that in paper
         if self.robot:  # Robot measurement exists
@@ -213,9 +237,11 @@ class ObjectFilter(Node):
                               ])
 
         # multiplying by the initial uncertainty
-        self.kf.P = np.array([[1, 0],
-                              [0, 1]
-                              ]) * self.measurement_uncertainty
+        self.kf.P = np.eye(4) * 1000
+
+        # assigning measurement noise
+        self.kf.R = np.array([[1, 0],
+                              [0, 1]]) * self.measurement_certainty
 
         # assigning process noise todo what does this mean
         self.kf.Q = Q_discrete_white_noise(dim=2, dt=self.filter_time_step, var=self.process_noise_variance,
@@ -246,9 +272,9 @@ class ObjectFilter(Node):
         pose_msg.pose.pose.position = point_msg
         pose_msg.pose.covariance = pos_covariance
         pose_msg.pose.pose.orientation.w = 1.0
-        self.robot_pose_publisher.publish(pose_msg)
+        self.robot_position_publisher.publish(pose_msg)
 
-        # velocity
+        # velocity todo done except var names
         movement_msg = TwistWithCovarianceStamped()
         movement_msg.header = header
         movement_msg.twist.twist.linear.x = float(state_vec[2] * self.filter_rate)

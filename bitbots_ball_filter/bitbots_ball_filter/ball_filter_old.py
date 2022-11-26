@@ -134,6 +134,7 @@ class BallFilter(Node):
                 ball_msg = sorted(msg.balls, key=lambda ball: ball.confidence.confidence)[-1]
             
             # A ball measurement was selected, now we save it for the next filter step
+            print(ball_msg.center)
             position = self._get_transform(msg.header, ball_msg.center)
             if position is not None:
                 self.ball = BallWrapper(position, msg.header, ball_msg.confidence.confidence)
@@ -161,6 +162,8 @@ class BallFilter(Node):
 
         point_stamped = PointStamped()
         point_stamped.header = header
+        print("pointy point: ")
+        print(point)
         point_stamped.point = point
         try:
             return self.tf_buffer.transform(point_stamped, frame, timeout=rclpy.duration.Duration(seconds=timeout))
