@@ -94,7 +94,7 @@ class ObjectFilter(Node):
             config['robot_movement_publish_topic'],
             1
         )
-        # publishes robots:
+        # publishes robot:
         self.robot_publisher = self.create_publisher(
             PoseWithCertaintyStamped,
             config['robot_publish_topic'],
