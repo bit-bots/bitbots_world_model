@@ -38,16 +38,23 @@ class RobotWrapper():
 
 class ObjectFilter(Node):
     def __init__(self) -> None:
+        #todo what do these do
         super().__init__("robot_filter", automatically_declare_parameters_from_overrides=True)
         self.logger = self.get_logger()
         self.tf_buffer = tf2.Buffer(cache_time=rclpy.duration.Duration(seconds=2))
         self.tf_listener = tf2.TransformListener(self.tf_buffer, self)
+
         # Setup dynamic reconfigure config
         self.config = {}
         self.add_on_set_parameters_callback(self._dynamic_reconfigure_callback)
         self._dynamic_reconfigure_callback(self.get_parameters_by_prefix("").values())
 
     def _dynamic_reconfigure_callback(self, config) -> SetParametersResult:
+        """
+        todo
+
+        paran config: todo
+        """
         # construct config from the params:
         tmp_config = deepcopy(self.config)
         for param in config:
@@ -60,13 +67,14 @@ class ObjectFilter(Node):
         self.robot = None  # type: RobotWrapper
         self.last_robot_stamp = None
 
-        self.filter_rate = config['filter_rate']
+        self.filter_rate = config['filter_rate'] #todo replace
         self.measurement_certainty = config['measurement_certainty']
         self.filter_time_step = 1.0 / self.filter_rate
         self.filter_reset_duration = rclpy.duration.Duration(seconds=config['filter_reset_time'])
         self.filter_reset_distance = config['filter_reset_distance']
         self.closest_distance_match = config['closest_distance_match']
 
+        #todo what does this do
         filter_frame = config['filter_frame']
         if filter_frame == "odom":
             self.filter_frame = config['odom_frame']
@@ -107,19 +115,25 @@ class ObjectFilter(Node):
             self.robot_callback,
             1
         )
-        #todo what is this?
+        # setup reset service
         self.reset_service = self.create_service(
             Trigger,
             config['robot_filter_reset_service_name'],
-            self.reset_filter_cb
+            self.reset_filter_callback
         )
 
-        #todo why:
+        #todo redo:
         self.config = config
         self.filter_timer = self.create_timer(self.filter_time_step, self.filter_step)
         return SetParametersResult(successful=True)
 
-    def reset_filter_cb(self, req, response) -> Tuple[bool, str]:
+    def reset_filter_callback(self, req, response) -> Tuple[bool, str]:
+        """
+        resets the filter when the reset trigger was received
+
+        paran req: todo
+        param response: todo
+        """
         self.logger.info("Resetting bitbots robot filter...")
         self.filter_initialized = False
         response.success = True
