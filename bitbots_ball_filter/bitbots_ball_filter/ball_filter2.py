@@ -124,8 +124,7 @@ class ObjectFilter(Node):
 
         #todo redo:
         self.config = config
-        # essentially this is the thing that calls the filter step
-        #self.filter_timer = self.create_timer(self.filter_time_step, self.filter_step)
+        self.filter_timer = self.create_timer(self.filter_time_step, self.filter_step)
         return SetParametersResult(successful=True)
 
     def reset_filter_callback(self, req, response) -> Tuple[bool, str]:
@@ -149,6 +148,7 @@ class ObjectFilter(Node):
 
         :param robot_msg: List of robot-detections
         """
+
         if msg.robots:
             # todo this
             if self.closest_distance_match:  # Select robot closest to previous prediction
@@ -158,7 +158,6 @@ class ObjectFilter(Node):
             position = self._get_transform(msg.header, robot_msg.bb.center.position)
             if position is not None:
                 self.robot = RobotWrapper(position, msg.header, robot_msg.confidence.confidence)
-            self.filter_step()
 
     def _get_closest_robot_to_previous_prediction(self, robot_array: RobotArray) -> Union[Robot, None]:
         closest_distance = math.inf
@@ -191,8 +190,8 @@ class ObjectFilter(Node):
             self.logger.warning(str(e))
 
     def filter_step(self) -> None:
-        #todo (because we only do it whne we have a measurement anyway) why is the original filter step done with a timer and not every time you get a new measurement?
-        #todo explain that in paper
+    #todo (because we only do it whne we have a measurement anyway) why is the original filter step done with a timer and not every time you get a new measurement?
+    #todo explain that in paper
         if self.robot:  # Robot measurement exists
             # Reset filter, if distance between last prediction and latest measurement is too large
             distance_to_robot = math.dist(
