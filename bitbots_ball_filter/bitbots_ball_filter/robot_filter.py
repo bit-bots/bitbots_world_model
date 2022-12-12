@@ -9,7 +9,7 @@ import tf2_ros as tf2
 
 from copy import deepcopy
 from filterpy.common import Q_discrete_white_noise
-from filterpy.kalman import KalmanFilter
+from filterpy.kalman import KalmanFilter, ExtendedKalmanFilter
 
 from rclpy.node import Node
 from std_msgs.msg import Header
@@ -63,6 +63,11 @@ class ObjectFilter(Node):
 
         # create Kalman filter:
         self.kf = KalmanFilter(dim_x=4, dim_z=2, dim_u=0)
+
+        # create extended Kalman filter:
+        num_state_vars = 4  # 2 for position, 1 for direction and 1 for velocity todo?
+        num_measurement_inputs = 2 # todo?
+        self.ekf = ExtendedKalmanFilter(dim_x=num_state_vars, dim_z=num_measurement_inputs)
         self.filter_initialized = False
         self.robot = None  # type: RobotWrapper
         self.last_robot_stamp = None
@@ -236,6 +241,31 @@ class ObjectFilter(Node):
     def init_filter(self, x: float, y: float) -> None:
         #todo look up what these things mean and put them in the text
 
+        # new ekf:
+
+        # State estimate vector:
+        self.ekf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
+
+        # State Transition matrix:
+        self.ekf.F = np.array([[1.0, 0.0, 1.0, 0.0],
+                              [0.0, 1.0, 0.0, 1.0],
+                              [0.0, 0.0, self.velocity_factor, 0.0],
+                              [0.0, 0.0, 0.0, self.velocity_factor]
+                              ])
+
+        # Measurement noise matrix:
+        self.ekf.R *= 10 #todo why
+
+        # Process noise matrix: #todo based on kf for now
+        self.ekf.Q = Q_discrete_white_noise(dim=2, dt=self.filter_time_step, var=self.process_noise_variance,
+                                           block_size=2, order_by_dim=False)
+
+        # Covariance matrix:
+        self.ekf.P *= 50 #todo why
+
+
+
+        #todo remove old
         # how do we deal with the multiple filters
         self.kf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
 

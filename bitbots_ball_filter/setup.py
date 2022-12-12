@@ -30,6 +30,7 @@ setup(
     entry_points={
         'console_scripts': [
             'ball_filter = bitbots_ball_filter.ball_filter:main',
+            'robot_filter = bitbots_ball_filter.robot_filter:main',
             'ball_sim = bitbots_ball_filter.ball_sim:main',
         ],
     }

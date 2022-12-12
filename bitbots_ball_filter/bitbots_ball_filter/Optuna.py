@@ -13,7 +13,7 @@ class FilterOptimizer(Node):
         super().__init__('robot_optimizer')
         print("RobotOptimizer initialised")
         self.current_filter_cycle = 0
-        self.distance_sum = 0
+        self.error_sum = 0
         self.stop_trial = False
         self.current_robot_groundtruth_msg = None
         self.robot_groundtruth_queue = []  # initializing queue
@@ -85,7 +85,7 @@ class FilterOptimizer(Node):
         # todo deal with multiple robots
         self.robot_position_filtered = robots_relative_filtered.pose.pose.position
 
-        # calculates distance between last ground truth of the robot positions and the current filtered robot positions
+        # calculates the error based on the distance between last ground truth of the robot positions and the current filtered robot positions
         # todo is this correct?
         robot = sorted(self.current_robot_groundtruth_msg.robots, key=lambda robot: robot.confidence.confidence)[-1]
         self.robot_position_groundtruth = robot.bb.center.position
@@ -94,9 +94,9 @@ class FilterOptimizer(Node):
         point_2 = (self.robot_position_filtered.x,
                    self.robot_position_filtered.y)
         distance = math.dist(point_1, point_2)
-        print("distance: " + str(distance))
+        print("error: " + str(distance))
         # distances are added up to create average value later
-        self.distance_sum += distance
+        self.error_sum += distance
         self.current_filter_cycle += 1
 
         self.publish_robots_relative_groundtruth()
@@ -108,11 +108,11 @@ class FilterOptimizer(Node):
         """
         return self.current_filter_cycle
 
-    def get_average_distance(self) -> float:
+    def get_average_error(self) -> float:
         """
-        returns average distance between ground truth and filtered robot positions for this trial
+        returns average error based on the distance between ground truth and filtered robot positions for this trial
         """
-        return self.distance_sum / self.current_filter_cycle
+        return self.error_sum / self.current_filter_cycle
 
     def get_stop_trial(self):
         """
@@ -145,12 +145,12 @@ def objective(trial) -> float:
         filter_optimizer.destroy_node()
         rclpy.shutdown()
 
-    average_distance = filter_optimizer.get_average_distance()
+    average_error = filter_optimizer.get_average_error()
     filter_optimizer.destroy_node()
     rclpy.shutdown()
 
     # return evaluation value
-    return average_distance
+    return average_error
 
 
 if __name__ == '__main__':
