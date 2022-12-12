@@ -9,7 +9,7 @@ import tf2_ros as tf2
 
 from copy import deepcopy
 from filterpy.common import Q_discrete_white_noise
-from filterpy.kalman import KalmanFilter, ExtendedKalmanFilter
+from filterpy.kalman import KalmanFilter, ExtendedKalmanFilter, UnscentedKalmanFilter, MerweScaledSigmaPoints
 
 from rclpy.node import Node
 from std_msgs.msg import Header
@@ -49,6 +49,60 @@ class ObjectFilter(Node):
         self.add_on_set_parameters_callback(self._dynamic_reconfigure_callback)
         self._dynamic_reconfigure_callback(self.get_parameters_by_prefix("").values())
 
+    def state_mean(self, sigmas, Wm):
+        x = np.zeros(3)
+
+        sum_sin = np.sum(np.dot(np.sin(sigmas[:, 2]), Wm))
+        sum_cos = np.sum(np.dot(np.cos(sigmas[:, 2]), Wm))
+        x[0] = np.sum(np.dot(sigmas[:, 0], Wm))
+        x[1] = np.sum(np.dot(sigmas[:, 1], Wm))
+        x[2] = atan2(sum_sin, sum_cos)
+        return x
+
+    def z_mean(self, sigmas, Wm):
+        z_count = sigmas.shape[1]
+        x = np.zeros(z_count)
+
+        for z in range(0, z_count, 2):
+            sum_sin = np.sum(np.dot(np.sin(sigmas[:, z + 1]), Wm))
+            sum_cos = np.sum(np.dot(np.cos(sigmas[:, z + 1]), Wm))
+
+            x[z] = np.sum(np.dot(sigmas[:, z], Wm))
+            x[z + 1] = atan2(sum_sin, sum_cos)
+        return x
+
+    def residual_h(self, a, b):
+        y = a - b
+        # data in format [dist_1, bearing_1, dist_2, bearing_2,...]
+        for i in range(0, len(y), 2):
+            y[i + 1] = self.normalize_angle(y[i + 1])
+        return y
+
+    def residual_x(self, a, b):
+        y = a - b
+        y[2] = self.normalize_angle(y[2])
+        return y
+
+    def normalize_angle(self, x):
+        x = x % (2 * np.pi)  # force in range [0, 2 pi)
+        if x > np.pi:  # move to [-pi, pi]
+            x -= 2 * np.pi
+        return x
+
+    def Hx(self, x, landmarks):
+        """ takes a state variable and returns the measurement that would
+        correspond to that state.
+        """
+        hx = []
+        for lmark in landmarks:
+            px, py = lmark
+            dist = sqrt((px - x[0]) ** 2 + (py - x[1]) ** 2)
+            angle = atan2(py - x[1], px - x[0])
+            hx.extend([dist, self.normalize_angle(angle - x[2])])
+        return np.array(hx)
+
+
+
     def _dynamic_reconfigure_callback(self, config) -> SetParametersResult:
         """
         todo
@@ -61,16 +115,24 @@ class ObjectFilter(Node):
             tmp_config[param.name] = param.value
         config = tmp_config
 
+        num_state_vars = 4  # 2 for position, 1 for direction and 1 for velocity todo?
+        num_measurement_inputs = 2 # todo?
+
         # create Kalman filter:
         self.kf = KalmanFilter(dim_x=4, dim_z=2, dim_u=0)
 
         # create extended Kalman filter:
-        num_state_vars = 4  # 2 for position, 1 for direction and 1 for velocity todo?
-        num_measurement_inputs = 2 # todo?
         self.ekf = ExtendedKalmanFilter(dim_x=num_state_vars, dim_z=num_measurement_inputs)
         self.filter_initialized = False
         self.robot = None  # type: RobotWrapper
         self.last_robot_stamp = None
+
+        #create unscented Kalman filter:
+        dt = 1.0
+        points = MerweScaledSigmaPoints(n=3, alpha=0.00001, beta=2, kappa=0, subtract=self.residual_x)
+        self.ukf = UnscentedKalmanFilter(dim_x=num_state_vars, dim_z=num_measurement_inputs, dt=dt, hx=self.Hx,
+                                         fx=self.fx, points=points, x_mean_fn=self.state_mean, z_mean_fn=self.z_mean,
+                                         residual_x=self.residual_x, residual_z=self.residual_h)#possibly sqrt_function
 
         self.filter_rate = config['filter_rate'] #todo replace
         self.measurement_certainty = config['measurement_certainty']
@@ -87,7 +149,7 @@ class ObjectFilter(Node):
             self.filter_frame = config['map_frame']
         self.logger.info(f"Using frame '{self.filter_frame}' for robot filtering")
 
-        # adapt velocity factor to frequency#todo whats this OWW
+        # adapt velocity factor to frequency#todo whats this
         self.velocity_factor = (1 - config['velocity_reduction']) ** (1 / self.filter_rate)
         self.process_noise_variance = config['process_noise_variance']
 
@@ -195,13 +257,37 @@ class ObjectFilter(Node):
         except (tf2.ConnectivityException, tf2.LookupException, tf2.ExtrapolationException) as e:
             self.logger.warning(str(e))
 
+    def get_robot_measurement(self) -> Tuple[float, float]:
+        """extracts filter measurement from robot message"""
+        return self.robot.get_position().point.x, self.robot.get_position().point.y
+
+    def filter_step_ukf(self) -> None:
+        if self.robot:  # Robot measurement exists
+
+            distance_to_robot = math.dist(
+                (self.kf.get_update()[0][0], self.kf.get_update()[0][1]), self.get_robot_measurement())
+
+            # predict:
+            self.ukf.predict()
+
+            # update:
+            self.ukf.update(self.get_robot_measurement())
+
+        else:  # No new robot measurement to handle
+            if self.filter_initialized:
+                pass
+            else:
+                pass
+
+        pass
+
     def filter_step(self) -> None:
         #todo (because we only do it whne we have a measurement anyway) why is the original filter step done with a timer and not every time you get a new measurement?
         #todo explain that in paper
         if self.robot:  # Robot measurement exists
             # Reset filter, if distance between last prediction and latest measurement is too large
             distance_to_robot = math.dist(
-                (self.kf.get_update()[0][0], self.kf.get_update()[0][1]), self.get_robot_measurement())
+                (self.ukf.get_update()[0][0], self.ukf.get_update()[0][1]), self.get_robot_measurement())
             if self.filter_initialized and distance_to_robot > self.filter_reset_distance:
                 self.filter_initialized = False
                 self.logger.info(
@@ -210,9 +296,12 @@ class ObjectFilter(Node):
             if not self.filter_initialized:
                 self.init_filter(*self.get_robot_measurement())
             # Predict and publish
-            self.kf.predict()
-            self.kf.update(self.get_robot_measurement())
-            self.publish_data(*self.kf.get_update())
+            self.ukf.predict()
+            #self.ukf.update(self.get_robot_measurement())
+
+            #self.publish_data(*self.kf.get_update())
+            # todo I assume I just have to use this since there is not get update, test if it returns something:
+            self.publish_data(*self.ukf.update(self.get_robot_measurement()))
             self.last_robot_stamp = self.robot.get_header().stamp
             self.robot = None  # Clear handled measurement
         else:  # No new robot measurement to handle
@@ -225,47 +314,38 @@ class ObjectFilter(Node):
                         f"Reset filter! Reason: Latest robot is too old {age} > {self.filter_reset_duration} (filter_reset_duration)")
                     return
                 # Empty update, as no new measurement available (and not too old)
-                self.kf.predict()
-                self.kf.update(None)
-                self.publish_data(*self.kf.get_update())
+
+                self.ukf.predict()
+                #self.ukf.update(None)
+                # self.publish_data(*self.kf.get_update())
+                # todo I assume I just have to use this since there is not get update:
+                self.publish_data(*self.ukf.update(None))
             else:  # Publish old state with huge covariance
-                state_vec, cov_mat = self.kf.get_update()
+                state_vec, cov_mat = self.ukf.get_update()
                 huge_cov_mat = np.eye(cov_mat.shape[0]) * 10
                 self.publish_data(state_vec, huge_cov_mat)
 
+    def filter_step_ekf(self) -> None:
+        pass
 
-    def get_robot_measurement(self) -> Tuple[float, float]:
-        """extracts filter measurement from robot message"""
-        return self.robot.get_position().point.x, self.robot.get_position().point.y
+    def init_filter_ukf(self, x: float, y: float) -> None:
+        self.ukf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
 
-    def init_filter(self, x: float, y: float) -> None:
-        #todo look up what these things mean and put them in the text
-
-        # new ekf:
-
-        # State estimate vector:
-        self.ekf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
-
-        # State Transition matrix:
-        self.ekf.F = np.array([[1.0, 0.0, 1.0, 0.0],
-                              [0.0, 1.0, 0.0, 1.0],
-                              [0.0, 0.0, self.velocity_factor, 0.0],
-                              [0.0, 0.0, 0.0, self.velocity_factor]
-                              ])
-
-        # Measurement noise matrix:
-        self.ekf.R *= 10 #todo why
-
-        # Process noise matrix: #todo based on kf for now
-        self.ekf.Q = Q_discrete_white_noise(dim=2, dt=self.filter_time_step, var=self.process_noise_variance,
+        self.ukf.P *= 0.2  # initial uncertainty
+        #self.kf.P = np.eye(4) * 1000
+        z_std = 0.1
+        self.ukf.R = np.diag([z_std ** 2, z_std ** 2])  # 1 standard
+        self.ukf.Q = Q_discrete_white_noise(dim=2, dt=dt, var=0.01 ** 2, block_size=2)
+        #self.kf.Q = Q_discrete_white_noise(dim=2, dt=self.filter_time_step, var=self.process_noise_variance,
                                            block_size=2, order_by_dim=False)
+        zs = [[i + randn() * z_std, i + randn() * z_std] for i in range(50)]  # measurements
 
-        # Covariance matrix:
-        self.ekf.P *= 50 #todo why
+        self.filter_initialized = True
+        pass
 
 
+def init_filter_kf(self, x: float, y: float) -> None:
 
-        #todo remove old
         # how do we deal with the multiple filters
         self.kf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
 
@@ -291,6 +371,34 @@ class ObjectFilter(Node):
         # assigning process noise todo what does this mean
         self.kf.Q = Q_discrete_white_noise(dim=2, dt=self.filter_time_step, var=self.process_noise_variance,
                                            block_size=2, order_by_dim=False)
+
+        self.filter_initialized = True
+        pass
+
+    def init_filter_ekf(self, x: float, y: float) -> None:
+        #todo look up what these things mean and put them in the text
+
+        # new ekf:
+
+        # State estimate vector:
+        self.ekf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
+
+        # State Transition matrix:
+        self.ekf.F = np.array([[1.0, 0.0, 1.0, 0.0],
+                              [0.0, 1.0, 0.0, 1.0],
+                              [0.0, 0.0, self.velocity_factor, 0.0],
+                              [0.0, 0.0, 0.0, self.velocity_factor]
+                              ])
+
+        # Measurement noise matrix:
+        self.ekf.R *= 10 #todo why
+
+        # Process noise matrix: #todo based on kf for now
+        self.ekf.Q = Q_discrete_white_noise(dim=2, dt=self.filter_time_step, var=self.process_noise_variance,
+                                           block_size=2, order_by_dim=False)
+
+        # Covariance matrix:
+        self.ekf.P *= 50 #todo why
 
         self.filter_initialized = True
         pass
