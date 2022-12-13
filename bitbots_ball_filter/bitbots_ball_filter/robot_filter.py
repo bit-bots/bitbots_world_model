@@ -101,8 +101,6 @@ class ObjectFilter(Node):
             hx.extend([dist, self.normalize_angle(angle - x[2])])
         return np.array(hx)
 
-
-
     def _dynamic_reconfigure_callback(self, config) -> SetParametersResult:
         """
         todo
@@ -129,6 +127,7 @@ class ObjectFilter(Node):
 
         #create unscented Kalman filter:
         dt = 1.0
+        self.fx = None  #todo
         points = MerweScaledSigmaPoints(n=3, alpha=0.00001, beta=2, kappa=0, subtract=self.residual_x)
         self.ukf = UnscentedKalmanFilter(dim_x=num_state_vars, dim_z=num_measurement_inputs, dt=dt, hx=self.Hx,
                                          fx=self.fx, points=points, x_mean_fn=self.state_mean, z_mean_fn=self.z_mean,
@@ -265,7 +264,7 @@ class ObjectFilter(Node):
         if self.robot:  # Robot measurement exists
 
             distance_to_robot = math.dist(
-                (self.kf.get_update()[0][0], self.kf.get_update()[0][1]), self.get_robot_measurement())
+                (self.ukf.get_update()[0][0], self.ukf.get_update()[0][1]), self.get_robot_measurement())
 
             # predict:
             self.ukf.predict()
@@ -284,6 +283,7 @@ class ObjectFilter(Node):
     def filter_step(self) -> None:
         #todo (because we only do it whne we have a measurement anyway) why is the original filter step done with a timer and not every time you get a new measurement?
         #todo explain that in paper
+        print("filter step")
         if self.robot:  # Robot measurement exists
             # Reset filter, if distance between last prediction and latest measurement is too large
             distance_to_robot = math.dist(
@@ -294,7 +294,7 @@ class ObjectFilter(Node):
                     f"Reset filter! Reason: Distance to robot {distance_to_robot} > {self.filter_reset_distance} (filter_reset_distance)")
             # Initialize filter if not already
             if not self.filter_initialized:
-                self.init_filter(*self.get_robot_measurement())
+                self.init_filter_ukf(*self.get_robot_measurement())
             # Predict and publish
             self.ukf.predict()
             #self.ukf.update(self.get_robot_measurement())
@@ -329,6 +329,7 @@ class ObjectFilter(Node):
         pass
 
     def init_filter_ukf(self, x: float, y: float) -> None:
+        print("init ukf")
         self.ukf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
 
         self.ukf.P *= 0.2  # initial uncertainty
@@ -337,14 +338,14 @@ class ObjectFilter(Node):
         self.ukf.R = np.diag([z_std ** 2, z_std ** 2])  # 1 standard
         self.ukf.Q = Q_discrete_white_noise(dim=2, dt=dt, var=0.01 ** 2, block_size=2)
         #self.kf.Q = Q_discrete_white_noise(dim=2, dt=self.filter_time_step, var=self.process_noise_variance,
-                                           block_size=2, order_by_dim=False)
+        # block_size=2, order_by_dim=False)
         zs = [[i + randn() * z_std, i + randn() * z_std] for i in range(50)]  # measurements
 
         self.filter_initialized = True
         pass
 
 
-def init_filter_kf(self, x: float, y: float) -> None:
+    def init_filter_kf(self, x: float, y: float) -> None:
 
         # how do we deal with the multiple filters
         self.kf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???

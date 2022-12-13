@@ -3,7 +3,8 @@ import os
 import rclpy
 import math
 from rclpy.node import Node
-import rospy
+from rosbags.rosbag2 import Reader
+from rosbags.serde import deserialize_cdr
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from soccer_vision_3d_msgs.msg import RobotArray
 
@@ -12,7 +13,7 @@ class FilterOptimizer(Node):
     def __init__(self) -> None:
         super().__init__('robot_optimizer')
         print("RobotOptimizer initialised")
-        self.current_filter_cycle = 0
+        self.current_filter_cycle = 1  # todo change this to 0 again
         self.error_sum = 0
         self.stop_trial = False
         self.current_robot_groundtruth_msg = None
@@ -46,10 +47,18 @@ class FilterOptimizer(Node):
 
         # reset filter:
         # todo get reset service name from config
-        robot_filter_reset_service_name = "ball_filter_reset"
-        os.system("ros2 service call /{} std_srvs/Trigger".format(robot_filter_reset_service_name))
+        # robot_filter_reset_service_name = "ball_filter_reset"
+        # os.system("ros2 service call /{} std_srvs/Trigger".format(robot_filter_reset_service_name))
 
         # unpack rosbag:
+        # create reader instance and open for reading
+        with Reader('/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0') as reader:
+            for msg in reader.messages():
+                print(msg)
+                #https://gitlab.com/ternaris/rosbags/-/blob/master/src/rosbags/interfaces/__init__.py
+            # for connection, timestamp, rawdata in reader.messages(['/position']):
+            #     msg = deserialize_cdr(rawdata, connection.msgtype)
+            #     print(msg.header.frame_id)
         #self.robot_groundtruth_queue.append()
         # todo bag name from config or somehting?
         # todo unpack bag
@@ -63,7 +72,7 @@ class FilterOptimizer(Node):
             self.current_robot_groundtruth_msg = self.robot_groundtruth_queue.pop()
             self.robot_relative_groundtruth_publisher.publish(self.current_robot_groundtruth_msg)
         else:
-            rospy.logwarn("Ran out of messages to publish. Stopping trial")
+            FilterOptimizer.get_logger(self).warn("Ran out of messages to publish. Stopping trial")
             self.stop_trial = True
 
     def robots_relative_groundtruth_callback(self, robots_relative_groundtruth) -> None: # todo no necessary anymore
