@@ -10,6 +10,7 @@ import tf2_ros as tf2
 from copy import deepcopy
 from filterpy.common import Q_discrete_white_noise
 from filterpy.kalman import KalmanFilter, ExtendedKalmanFilter, UnscentedKalmanFilter, MerweScaledSigmaPoints
+from numpy.random.mtrand import randn
 
 from rclpy.node import Node
 from std_msgs.msg import Header
@@ -46,8 +47,8 @@ class ObjectFilter(Node):
 
         # Setup dynamic reconfigure config
         self.config = {}
-        self.add_on_set_parameters_callback(self._dynamic_reconfigure_callback)
-        self._dynamic_reconfigure_callback(self.get_parameters_by_prefix("").values())
+        self.add_on_set_parameters_callback(self._dynamic_reconfigure_callback)  # todo what does this do
+        self._dynamic_reconfigure_callback(self.get_parameters_by_prefix("").values())  # todo figure out
 
     def state_mean(self, sigmas, Wm):
         x = np.zeros(3)
@@ -89,9 +90,12 @@ class ObjectFilter(Node):
             x -= 2 * np.pi
         return x
 
-    def Hx(self, x, landmarks):
-        """ takes a state variable and returns the measurement that would
-        correspond to that state.
+    def hx(self, x, landmarks):
+        """
+        Measurement function. Converts state vector x into a measurement vector of shape (dim_z).
+
+        param x: state vector
+        param landmarks:
         """
         hx = []
         for lmark in landmarks:
@@ -101,11 +105,24 @@ class ObjectFilter(Node):
             hx.extend([dist, self.normalize_angle(angle - x[2])])
         return np.array(hx)
 
+    # k = k_t
+    # S = cov_emp
+    # diff = s_ut?, x_tt-1
+    # covariance_z = cov_cross
+    # i von 1 bis 2n+1
+    # sigma points = s_pi (i um 1 versetzt)
+    # self.mu = hat x_tt-1
+    # R = noise matrix
+    # wci = wuci
+    # diff = s_ui - x_emp
+    # z(i) = s_ui
+    # z_hat = x_emp
+
     def _dynamic_reconfigure_callback(self, config) -> SetParametersResult:
         """
-        todo
+        Handles setup at the start and after parameter changes.
 
-        paran config: todo
+        param config: configuration with current parameter values
         """
         # construct config from the params:
         tmp_config = deepcopy(self.config)
@@ -113,26 +130,33 @@ class ObjectFilter(Node):
             tmp_config[param.name] = param.value
         config = tmp_config
 
-        num_state_vars = 4  # 2 for position, 1 for direction and 1 for velocity todo?
+        num_state_vars = 4  # 2 for position, 1 for direction and 1 for velocity
         num_measurement_inputs = 2 # todo?
 
         # create Kalman filter:
-        self.kf = KalmanFilter(dim_x=4, dim_z=2, dim_u=0)
+        self.kf = KalmanFilter(dim_x=num_state_vars, dim_z=num_measurement_inputs, dim_u=0)
 
         # create extended Kalman filter:
         self.ekf = ExtendedKalmanFilter(dim_x=num_state_vars, dim_z=num_measurement_inputs)
+
+        # create unscented Kalman filter: todo
+        self.dt = 1.0  #todo is this the same as filter time step?
+        self.fx = None  #todo
+        points = MerweScaledSigmaPoints(n=3, alpha=0.00001, beta=2, kappa=0, subtract=self.residual_x) #todo
+        # self.ukf = UnscentedKalmanFilter(dim_x=num_state_vars,
+        #                                  dim_z=num_measurement_inputs,
+        #                                  dt=self.dt,
+        #                                  hx=self.hx,
+        #                                  fx=self.fx,
+        #                                  points=points,
+        #                                  x_mean_fn=self.state_mean,
+        #                                  z_mean_fn=self.z_mean,
+        #                                  residual_x=self.residual_x,
+        #                                  residual_z=self.residual_h)
+        # additional setup:
         self.filter_initialized = False
         self.robot = None  # type: RobotWrapper
         self.last_robot_stamp = None
-
-        #create unscented Kalman filter:
-        dt = 1.0
-        self.fx = None  #todo
-        points = MerweScaledSigmaPoints(n=3, alpha=0.00001, beta=2, kappa=0, subtract=self.residual_x)
-        self.ukf = UnscentedKalmanFilter(dim_x=num_state_vars, dim_z=num_measurement_inputs, dt=dt, hx=self.Hx,
-                                         fx=self.fx, points=points, x_mean_fn=self.state_mean, z_mean_fn=self.z_mean,
-                                         residual_x=self.residual_x, residual_z=self.residual_h)#possibly sqrt_function
-
         self.filter_rate = config['filter_rate'] #todo replace
         self.measurement_certainty = config['measurement_certainty']
         self.filter_time_step = 1.0 / self.filter_rate
@@ -156,19 +180,19 @@ class ObjectFilter(Node):
 
         #todo what other attributes for the robot would need to be published:
 
-        # publishes positions of robots:
+        # setup robot position publisher:
         self.robot_position_publisher = self.create_publisher(
             PoseWithCovarianceStamped,
             config['robot_position_publish_topic'],
             1
         )
-        # publishes velocity of robots:
+        # setup robot velocity publisher:
         self.robot_movement_publisher = self.create_publisher(
             TwistWithCovarianceStamped,
             config['robot_movement_publish_topic'],
             1
         )
-        # publishes robot:
+        # setup robot publisher:
         self.robot_publisher = self.create_publisher(
             PoseWithCertaintyStamped,
             config['robot_publish_topic'],
@@ -188,7 +212,6 @@ class ObjectFilter(Node):
             self.reset_filter_callback
         )
 
-        #todo redo:
         self.config = config
         # essentially this is the thing that calls the filter step
         #self.filter_timer = self.create_timer(self.filter_time_step, self.filter_step)
@@ -213,13 +236,14 @@ class ObjectFilter(Node):
         #todo the original just decides which ball to take since it doesnt need to assign filters
         #todo so do I already assign filters here or later?
 
-        :param robot_msg: List of robot-detections
+        :param msg: List of robot-detections
         """
         if msg.robots:
-            # todo this
-            if self.closest_distance_match:  # Select robot closest to previous prediction
+            if self.closest_distance_match:
+                # select robot closest to previous prediction
                 robot_msg = self._get_closest_robot_to_previous_prediction(msg)
             else:
+                # select robot by confidence
                 robot_msg = sorted(msg.robots, key=lambda robot: robot.confidence.confidence)[-1]
             position = self._get_transform(msg.header, robot_msg.bb.center.position)
             if position is not None:
@@ -260,51 +284,35 @@ class ObjectFilter(Node):
         """extracts filter measurement from robot message"""
         return self.robot.get_position().point.x, self.robot.get_position().point.y
 
-    def filter_step_ukf(self) -> None:
-        if self.robot:  # Robot measurement exists
-
-            distance_to_robot = math.dist(
-                (self.ukf.get_update()[0][0], self.ukf.get_update()[0][1]), self.get_robot_measurement())
-
-            # predict:
-            self.ukf.predict()
-
-            # update:
-            self.ukf.update(self.get_robot_measurement())
-
-        else:  # No new robot measurement to handle
-            if self.filter_initialized:
-                pass
-            else:
-                pass
-
-        pass
-
     def filter_step(self) -> None:
         #todo (because we only do it whne we have a measurement anyway) why is the original filter step done with a timer and not every time you get a new measurement?
         #todo explain that in paper
         print("filter step")
         if self.robot:  # Robot measurement exists
             # Reset filter, if distance between last prediction and latest measurement is too large
-            distance_to_robot = math.dist(
-                (self.ukf.get_update()[0][0], self.ukf.get_update()[0][1]), self.get_robot_measurement())
+            distance_to_robot = 1.0
+            # distance_to_robot = math.dist(
+              #  (self.ukf.get_update()[0][0], self.ukf.get_update()[0][1]), self.get_robot_measurement())
+            # check if robot is close enough to previous prediction:
             if self.filter_initialized and distance_to_robot > self.filter_reset_distance:
                 self.filter_initialized = False
                 self.logger.info(
                     f"Reset filter! Reason: Distance to robot {distance_to_robot} > {self.filter_reset_distance} (filter_reset_distance)")
+
             # Initialize filter if not already
             if not self.filter_initialized:
                 self.init_filter_ukf(*self.get_robot_measurement())
-            # Predict and publish
-            self.ukf.predict()
-            #self.ukf.update(self.get_robot_measurement())
 
-            #self.publish_data(*self.kf.get_update())
-            # todo I assume I just have to use this since there is not get update, test if it returns something:
-            self.publish_data(*self.ukf.update(self.get_robot_measurement()))
+            # Predict:
+            #self.ukf.predict()
+            # Update and publish:
+            #self.publish_data(*self.ukf.update(self.get_robot_measurement()))
+
             self.last_robot_stamp = self.robot.get_header().stamp
             self.robot = None  # Clear handled measurement
+
         else:  # No new robot measurement to handle
+            #todo
             if self.filter_initialized:
                 # Reset filer,if last measurement is too old
                 age = self.get_clock().now() - rclpy.time.Time.from_msg(self.last_robot_stamp)
@@ -315,13 +323,14 @@ class ObjectFilter(Node):
                     return
                 # Empty update, as no new measurement available (and not too old)
 
-                self.ukf.predict()
+                #self.ukf.predict()
                 #self.ukf.update(None)
                 # self.publish_data(*self.kf.get_update())
                 # todo I assume I just have to use this since there is not get update:
-                self.publish_data(*self.ukf.update(None))
+                #self.publish_data(*self.ukf.update(None))
             else:  # Publish old state with huge covariance
-                state_vec, cov_mat = self.ukf.get_update()
+                #state_vec, cov_mat = self.ukf.get_update()
+                state_vec, cov_mat = None  #todo remove
                 huge_cov_mat = np.eye(cov_mat.shape[0]) * 10
                 self.publish_data(state_vec, huge_cov_mat)
 
@@ -330,13 +339,13 @@ class ObjectFilter(Node):
 
     def init_filter_ukf(self, x: float, y: float) -> None:
         print("init ukf")
-        self.ukf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
+        #self.ukf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
 
-        self.ukf.P *= 0.2  # initial uncertainty
+        #self.ukf.P *= 0.2  # initial uncertainty
         #self.kf.P = np.eye(4) * 1000
         z_std = 0.1
-        self.ukf.R = np.diag([z_std ** 2, z_std ** 2])  # 1 standard
-        self.ukf.Q = Q_discrete_white_noise(dim=2, dt=dt, var=0.01 ** 2, block_size=2)
+        #self.ukf.R = np.diag([z_std ** 2, z_std ** 2])  # 1 standard
+        #self.ukf.Q = Q_discrete_white_noise(dim=2, dt=self.dt, var=0.01 ** 2, block_size=2)
         #self.kf.Q = Q_discrete_white_noise(dim=2, dt=self.filter_time_step, var=self.process_noise_variance,
         # block_size=2, order_by_dim=False)
         zs = [[i + randn() * z_std, i + randn() * z_std] for i in range(50)]  # measurements
