@@ -7,6 +7,10 @@ from rosbags.rosbag2 import Reader
 from rosbags.serde import deserialize_cdr
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from soccer_vision_3d_msgs.msg import RobotArray
+import sqlite3
+from rosidl_runtime_py.utilities import get_message
+from rclpy.serialization import deserialize_message
+import matplotlib.pyplot as plt
 
 
 class FilterOptimizer(Node):
@@ -52,9 +56,12 @@ class FilterOptimizer(Node):
 
         # unpack rosbag:
         # create reader instance and open for reading
+        bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/' \
+                   'rosbag2_2022_12_13-12_34_57_0.db3'
         with Reader('/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0') as reader:
             for msg in reader.messages():
-                print(msg)
+                pass
+                #print(msg)
                 #https://gitlab.com/ternaris/rosbags/-/blob/master/src/rosbags/interfaces/__init__.py
             # for connection, timestamp, rawdata in reader.messages(['/position']):
             #     msg = deserialize_cdr(rawdata, connection.msgtype)
@@ -129,6 +136,30 @@ class FilterOptimizer(Node):
         """
         return self.stop_trial
 
+class BagFileParser():
+    def __init__(self, bag_file):
+        self.conn = sqlite3.connect(bag_file)
+        self.cursor = self.conn.cursor()
+
+        ## create a message type map
+        topics_data = self.cursor.execute("SELECT id, name, type FROM topics").fetchall()
+        self.topic_type = {name_of:type_of for id_of,name_of,type_of in topics_data}
+        self.topic_id = {name_of:id_of for id_of,name_of,type_of in topics_data}
+        self.topic_msg_message = {name_of:get_message(type_of) for id_of,name_of,type_of in topics_data}
+
+    def __del__(self):
+        self.conn.close()
+
+    # Return [(timestamp0, message0), (timestamp1, message1), ...]
+    def get_messages(self, topic_name):
+
+        topic_id = self.topic_id[topic_name]
+        # Get from the db
+        rows = self.cursor.execute("SELECT timestamp, data FROM messages WHERE topic_id = {}".format(topic_id)).fetchall()
+        # Deserialise all and timestamp them
+        return [ (timestamp,deserialize_message(data, self.topic_msg_message[topic_name])) for timestamp,data in rows]
+
+
 def objective(trial) -> float:
     """
     Optuna's objective function that runs through a trial, tries out parameter values
@@ -142,6 +173,8 @@ def objective(trial) -> float:
     x = trial.suggest_int("x", 1, 10)
     print("Suggestion for filter_reset_distance: " + str(x))
     os.system("ros2 param set /bitbots_ball_filter filter_reset_distance " + str(x))
+
+
 
     # start filter optimizer
     # todo
@@ -163,6 +196,23 @@ def objective(trial) -> float:
 
 
 if __name__ == '__main__':
+    #todo
+    bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/' \
+               'rosbag2_2022_12_13-12_34_57_0.db3'
+
+    parser = BagFileParser(bag_file)
+
+    temp = parser.get_messages("/position")
+    print(temp)
+    # p_des_1 = [trajectory.points[i].positions[0] for i in range(len(trajectory.points))]
+    # t_des = [trajectory.points[i].time_from_start.sec + trajectory.points[i].time_from_start.nanosec*1e-9 for i in range(len(trajectory.points))]
+
+    actual = parser.get_messages("/position")
+
+    # plt.plot(t_des, p_des_1)
+    #
+    # plt.show()
+
     # create study:
     study = optuna.create_study()
     # start study with set number of trials
