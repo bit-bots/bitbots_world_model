@@ -2,8 +2,11 @@ import optuna
 import os
 import rclpy
 import math
+import json
 from rclpy.node import Node
 from rosbags.rosbag2 import Reader
+from rosbags import interfaces
+from rosbags.interfaces import Connection
 from rosbags.serde import deserialize_cdr
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from soccer_vision_3d_msgs.msg import RobotArray
@@ -169,13 +172,15 @@ def objective(trial) -> float:
     """
 
     # suggest parameter values
-    # todo for more parameters
-    x = trial.suggest_int("x", 1, 10)
-    print("Suggestion for filter_reset_distance: " + str(x))
-    os.system("ros2 param set /bitbots_ball_filter filter_reset_distance " + str(x))
-
-
-
+    f = open('data.json')
+    data = json.load(f)
+    for parameter in data["parameters"]:
+        temp = None
+        if parameter["type"] == "int":
+            temp = trial.suggest_int(parameter["name"], parameter["min"], parameter["max"])
+        print("Suggestion for " + parameter["name"] + ": " + str(temp))
+        os.system("ros2 param set /bitbots_ball_filter " + parameter["name"] + " " + str(temp))
+    f.close()
     # start filter optimizer
     # todo
     rclpy.init()
