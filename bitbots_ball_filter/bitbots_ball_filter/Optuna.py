@@ -178,6 +178,10 @@ def objective(trial) -> float:
         temp = None
         if parameter["type"] == "int":
             temp = trial.suggest_int(parameter["name"], parameter["min"], parameter["max"])
+        elif parameter["type"] == "float":
+            temp = trial.suggest_float(parameter["name"], parameter["min"], parameter["max"])
+        elif parameter["type"] == "categorical":
+            temp = trial.suggest_categorical(parameter["name"], parameter["choices"])
         print("Suggestion for " + parameter["name"] + ": " + str(temp))
         os.system("ros2 param set /bitbots_ball_filter " + parameter["name"] + " " + str(temp))
     f.close()
@@ -228,5 +232,40 @@ if __name__ == '__main__':
 
     # todo proper debug:
     best_params = study.best_params
-    found_x = best_params["x"]
-    print("Found x: {} as best value".format(found_x))
+
+    f = open('data.json')
+    data = json.load(f)
+    f2 = open('output_data.json')
+    data2 = json.load(f2)
+    parameters = []
+    for parameter in data["parameters"]:
+        parameter_name = parameter["name"]
+        parameter_type = parameter["type"]
+        if parameter_type == "categorical":
+            parameter_choices = parameter["choices"]
+            parameters.append({
+                "name": parameter_name,
+                "type": parameter_type,
+                "choices": parameter_choices,
+                "result": best_params[parameter_name]
+            })
+        else:
+            parameter_min = parameter["min"]
+            parameter_max = parameter["max"]
+            parameters.append({
+                "name": parameter_name,
+                "type": parameter_type,
+                "min": parameter_min,
+                "max": parameter_max,
+                "result": best_params[parameter_name]
+            })
+        print("Found {}. Best value is: {}".format(parameter_name, best_params[parameter_name]))
+    trial_output = {
+        "trial_number": 0,
+        "parameters": parameters
+    }
+    data2['trial_outputs'].append(trial_output)
+    f2.write(data2)
+
+
+

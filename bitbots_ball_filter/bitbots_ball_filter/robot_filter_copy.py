@@ -54,60 +54,60 @@ class ObjectFilter(Node):
         print(self.get_parameters_by_prefix("").values())
         self._dynamic_reconfigure_callback(self.get_parameters_by_prefix("").values())  # todo figure out
 
-    # def state_mean(self, sigmas, Wm):
-    #     x = np.zeros(3)
-    #
-    #     sum_sin = np.sum(np.dot(np.sin(sigmas[:, 2]), Wm))
-    #     sum_cos = np.sum(np.dot(np.cos(sigmas[:, 2]), Wm))
-    #     x[0] = np.sum(np.dot(sigmas[:, 0], Wm))
-    #     x[1] = np.sum(np.dot(sigmas[:, 1], Wm))
-    #     x[2] = atan2(sum_sin, sum_cos)
-    #     return x
+    def state_mean(self, sigmas, Wm):
+        x = np.zeros(3)
 
-    # def z_mean(self, sigmas, Wm):
-    #     z_count = sigmas.shape[1]
-    #     x = np.zeros(z_count)
-    #
-    #     for z in range(0, z_count, 2):
-    #         sum_sin = np.sum(np.dot(np.sin(sigmas[:, z + 1]), Wm))
-    #         sum_cos = np.sum(np.dot(np.cos(sigmas[:, z + 1]), Wm))
-    #
-    #         x[z] = np.sum(np.dot(sigmas[:, z], Wm))
-    #         x[z + 1] = atan2(sum_sin, sum_cos)
-    #     return x
+        sum_sin = np.sum(np.dot(np.sin(sigmas[:, 2]), Wm))
+        sum_cos = np.sum(np.dot(np.cos(sigmas[:, 2]), Wm))
+        x[0] = np.sum(np.dot(sigmas[:, 0], Wm))
+        x[1] = np.sum(np.dot(sigmas[:, 1], Wm))
+        x[2] = atan2(sum_sin, sum_cos)
+        return x
 
-    # def residual_h(self, a, b):
-    #     y = a - b
-    #     # data in format [dist_1, bearing_1, dist_2, bearing_2,...]
-    #     for i in range(0, len(y), 2):
-    #         y[i + 1] = self.normalize_angle(y[i + 1])
-    #     return y
+    def z_mean(self, sigmas, Wm):
+        z_count = sigmas.shape[1]
+        x = np.zeros(z_count)
 
-    # def residual_x(self, a, b):
-    #     y = a - b
-    #     y[2] = self.normalize_angle(y[2])
-    #     return y
+        for z in range(0, z_count, 2):
+            sum_sin = np.sum(np.dot(np.sin(sigmas[:, z + 1]), Wm))
+            sum_cos = np.sum(np.dot(np.cos(sigmas[:, z + 1]), Wm))
 
-    # def normalize_angle(self, x):
-    #     x = x % (2 * np.pi)  # force in range [0, 2 pi)
-    #     if x > np.pi:  # move to [-pi, pi]
-    #         x -= 2 * np.pi
-    #     return x
+            x[z] = np.sum(np.dot(sigmas[:, z], Wm))
+            x[z + 1] = atan2(sum_sin, sum_cos)
+        return x
 
-    # def hx(self, x, landmarks):
-    #     """
-    #     Measurement function. Converts state vector x into a measurement vector of shape (dim_z).
-    #
-    #     param x: state vector
-    #     param landmarks:
-    #     """
-    #     hx = []
-    #     for lmark in landmarks:
-    #         px, py = lmark
-    #         dist = sqrt((px - x[0]) ** 2 + (py - x[1]) ** 2)
-    #         angle = atan2(py - x[1], px - x[0])
-    #         hx.extend([dist, self.normalize_angle(angle - x[2])])
-    #     return np.array(hx)
+    def residual_h(self, a, b):
+        y = a - b
+        # data in format [dist_1, bearing_1, dist_2, bearing_2,...]
+        for i in range(0, len(y), 2):
+            y[i + 1] = self.normalize_angle(y[i + 1])
+        return y
+
+    def residual_x(self, a, b):
+        y = a - b
+        y[2] = self.normalize_angle(y[2])
+        return y
+
+    def normalize_angle(self, x):
+        x = x % (2 * np.pi)  # force in range [0, 2 pi)
+        if x > np.pi:  # move to [-pi, pi]
+            x -= 2 * np.pi
+        return x
+
+    def hx(self, x, landmarks):
+        """
+        Measurement function. Converts state vector x into a measurement vector of shape (dim_z).
+
+        param x: state vector
+        param landmarks:
+        """
+        hx = []
+        for lmark in landmarks:
+            px, py = lmark
+            dist = sqrt((px - x[0]) ** 2 + (py - x[1]) ** 2)
+            angle = atan2(py - x[1], px - x[0])
+            hx.extend([dist, self.normalize_angle(angle - x[2])])
+        return np.array(hx)
 
     # k = k_t
     # S = cov_emp
@@ -146,17 +146,17 @@ class ObjectFilter(Node):
         # create unscented Kalman filter: todo
         self.dt = 1.0  #todo is this the same as filter time step?
         self.fx = None  #todo
-        # points = MerweScaledSigmaPoints(n=3, alpha=0.00001, beta=2, kappa=0, subtract=self.residual_x) #todo
-        # self.ukf = UnscentedKalmanFilter(dim_x=num_state_vars,
-        #                                  dim_z=num_measurement_inputs,
-        #                                  dt=self.dt,
-        #                                  hx=self.hx,
-        #                                  fx=self.fx,
-        #                                  points=points,
-        #                                  x_mean_fn=self.state_mean,
-        #                                  z_mean_fn=self.z_mean,
-        #                                  residual_x=self.residual_x,
-        #                                  residual_z=self.residual_h)
+        points = MerweScaledSigmaPoints(n=3, alpha=0.00001, beta=2, kappa=0, subtract=self.residual_x) #todo
+        self.ukf = UnscentedKalmanFilter(dim_x=num_state_vars,
+                                         dim_z=num_measurement_inputs,
+                                         dt=self.dt,
+                                         hx=self.hx,
+                                         fx=self.fx,
+                                         points=points,
+                                         x_mean_fn=self.state_mean,
+                                         z_mean_fn=self.z_mean,
+                                         residual_x=self.residual_x,
+                                         residual_z=self.residual_h)
         # additional setup:
         self.filter_initialized = False
         self.robot = None  # type: RobotWrapper
@@ -167,8 +167,6 @@ class ObjectFilter(Node):
         self.filter_reset_duration = rclpy.duration.Duration(seconds=config['robot_filter_reset_time'])
         self.filter_reset_distance = config['robot_filter_reset_distance']
         self.closest_distance_match = config['robot_closest_distance_match']
-        self.transition_modifier_x = config['robot_transition_modifier_x']
-        self.transition_modifier_y = config['robot_transition_modifier_y']
 
         #todo what does this do
         filter_frame = config['robot_filter_frame']
@@ -179,8 +177,7 @@ class ObjectFilter(Node):
         self.logger.info(f"Using frame '{self.filter_frame}' for robot filtering")
 
         # adapt velocity factor to frequency#todo whats this
-        self.velocity_factor_x = (1 - config['robot_velocity_reduction_x']) ** (1 / self.filter_rate)
-        self.velocity_factor_y = (1 - config['robot_velocity_reduction_y']) ** (1 / self.filter_rate)
+        self.velocity_factor = (1 - config['robot_velocity_reduction']) ** (1 / self.filter_rate)
         self.process_noise_variance = config['robot_process_noise_variance']
 
         # setup publishers and subscribers:
@@ -422,10 +419,10 @@ class ObjectFilter(Node):
         self.kf.x = np.array([x, y, 0, 0]) # initial position of robot + velocity in x and y direction???
 
         # transition matrix?
-        self.kf.F = np.array([[1.0, 0.0, self.transition_modifier_x, 0.0],
-                              [0.0, 1.0, 0.0, self.transition_modifier_y],
-                              [0.0, 0.0, self.velocity_factor_x, 0.0],
-                              [0.0, 0.0, 0.0, self.velocity_factor_y]
+        self.kf.F = np.array([[1.0, 0.0, 1.0, 0.0],
+                              [0.0, 1.0, 0.0, 1.0],
+                              [0.0, 0.0, self.velocity_factor, 0.0],
+                              [0.0, 0.0, 0.0, self.velocity_factor]
                               ])
 
         # measurement function
