@@ -68,5 +68,5 @@ bitbots_ball_filter:
     robot_closest_distance_match: True
 
     # todo are these really x and y?
-    robot_transition_x_modifier: 1.0
-    robot_transition_y_modifier: 1.0
+    robot_transition_modifier_x: 1.0
+    robot_transition_modifier_y: 1.0
