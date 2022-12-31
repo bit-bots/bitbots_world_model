@@ -45,10 +45,10 @@ class FilterOptimizer(Node):
             1
         )
 
-        # setup publisher for ground truth from rosbag:
+        # setup publisher for robto relative with noise from rosbag:
         self.robot_position_err_publisher = self.create_publisher( #todo
-            PoseWithCovarianceStamped,
-            'position_err',
+            RobotArray,
+            'robots_relative',
             1
         )
 
@@ -64,7 +64,7 @@ class FilterOptimizer(Node):
         bag_file = '/home/hendrik/Documents/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
         parser = BagFileParser(bag_file)
         # todo am I doing this the wrong way around? is this actually getting the last msg first?
-        self.robot_position_err_queue = parser.get_messages("/position_err")
+        self.robot_position_err_queue = parser.get_messages("/robots_relative")
         # todo get the non-err positions out of it for distance calculation
 
 
@@ -117,8 +117,8 @@ class FilterOptimizer(Node):
 
         # calculates the error based on the distance between last ground truth of the robot positions and the current filtered robot positions
         # todo is this correct?
-        robot = sorted(self.current_robot_position_err_msg.robots, key=lambda robot: robot.confidence.confidence)[-1]
-        self.robot_position_groundtruth = robot.bb.center.position
+        robot_msg = sorted(self.current_robot_position_err_msg[1].robots, key=lambda robot: robot.confidence.confidence)[-1]
+        self.robot_position_groundtruth = robot_msg.bb.center.position
         point_1 = (self.robot_position_groundtruth.x,
                    self.robot_position_groundtruth.y)
         point_2 = (self.robot_position_filtered.x,
@@ -229,14 +229,14 @@ if __name__ == '__main__':
     study = optuna.create_study()
     # start study with set number of trials
     try:
-        study.optimize(objective, n_trials=1)
+        study.optimize(objective, n_trials=10)
     except KeyboardInterrupt:
         print("Keyboard interrupt. Aborting optimization study")
 
     # todo proper debug:
     best_params = study.best_params
 
-    print("_HERE")
+    # Save best parameter values to output file:
     with open('data.json') as f:
         data = json.load(f)
     with open('output_data.json', 'r') as f2:

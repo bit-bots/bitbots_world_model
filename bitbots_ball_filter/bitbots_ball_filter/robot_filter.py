@@ -3,7 +3,6 @@ from typing import Union, Tuple
 
 import math
 import numpy as np
-
 import rclpy
 import tf2_ros as tf2
 

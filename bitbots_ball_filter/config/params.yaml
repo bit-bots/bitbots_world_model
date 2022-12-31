@@ -59,14 +59,14 @@ bitbots_ball_filter:
     robot_measurement_certainty: 0.1
 
     # Max robot not seen time in Seconds
-    robot_filter_reset_time: 20
+    robot_filter_reset_time: 37 #20
 
     # Distance to the current estimation causing a filter reset
-    robot_filter_reset_distance: 2
+    robot_filter_reset_distance: 7 #2
 
     # True if robot should be selected based on distance to filtered robot instead of highest rating
-    robot_closest_distance_match: True
+    robot_closest_distance_match: False #True
 
     # todo are these really x and y?
-    robot_transition_modifier_x: 1.0
-    robot_transition_modifier_y: 1.0
+    robot_transition_modifier_x: 5.0 #1.0
+    robot_transition_modifier_y: 5.0 #1.0
