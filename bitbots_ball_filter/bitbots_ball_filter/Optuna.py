@@ -3,11 +3,8 @@ import os
 import rclpy
 import math
 import json
+import argparse
 from rclpy.node import Node
-from rosbags.rosbag2 import Reader
-from rosbags import interfaces
-from rosbags.interfaces import Connection
-from rosbags.serde import deserialize_cdr
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from soccer_vision_3d_msgs.msg import RobotArray
 import sqlite3
@@ -19,12 +16,12 @@ import matplotlib.pyplot as plt
 class FilterOptimizer(Node):
     def __init__(self) -> None:
         super().__init__('robot_optimizer')
-        print("RobotOptimizer initialised")
+        self.logger = self.get_logger()
         self.current_filter_cycle = 1  # todo change this to 0 again
         self.error_sum = 0
         self.stop_trial = False
-        self.current_robot_position_err_msg = None
-        self.robot_position_err_queue = []  # initializing queue
+        self.current_robot_relative_err_msg = None
+        self.robot_relative_err_queue = []  # initializing queue
         self.robot_position_groundtruth = None
         self.robot_position_filtered = None
 
@@ -60,11 +57,12 @@ class FilterOptimizer(Node):
 
         # unpack rosbag:
         # bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
-        print("unpacking bag")
+        self.logger.info("Unpacking bag")
         bag_file = '/home/hendrik/Documents/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
         parser = BagFileParser(bag_file)
         # todo am I doing this the wrong way around? is this actually getting the last msg first?
-        self.robot_position_err_queue = parser.get_messages("/robots_relative")
+        self.robot_relative_err_queue = parser.get_messages("/robots_relative")
+        self.robot_position_true_queue = parser.get_messages("/position")
         # todo get the non-err positions out of it for distance calculation
 
 
@@ -82,18 +80,18 @@ class FilterOptimizer(Node):
         #self.robot_groundtruth_queue.append()
         # todo bag name from config or somehting?
         # todo unpack bag
+        self.logger.info("RobotOptimizer initialised")
         self.publish_robot_position_err()
 
     def publish_robot_position_err(self):
         """
         pops first message from the message queue created out of the rosbag and publishes it
         """
-        if len(self.robot_position_err_queue) > 0:
-            self.current_robot_position_err_msg = self.robot_position_err_queue.pop()
-            print(self.current_robot_position_err_msg[1])
-            self.robot_position_err_publisher.publish(self.current_robot_position_err_msg[1])  # the msg is a tuple of time stamp + msg
+        if len(self.robot_relative_err_queue) > 0:
+            self.current_robot_relative_err_msg = self.robot_relative_err_queue.pop()
+            self.robot_position_err_publisher.publish(self.current_robot_relative_err_msg[1])  # the msg is a tuple of time stamp + msg
         else:
-            FilterOptimizer.get_logger(self).warn("Ran out of messages to publish. Stopping trial")
+            self.logger.warn("Ran out of messages to publish. Stopping trial")
             self.stop_trial = True
 
     def robots_relative_groundtruth_callback(self, robots_relative_groundtruth) -> None: # todo no necessary anymore
@@ -117,14 +115,14 @@ class FilterOptimizer(Node):
 
         # calculates the error based on the distance between last ground truth of the robot positions and the current filtered robot positions
         # todo is this correct?
-        robot_msg = sorted(self.current_robot_position_err_msg[1].robots, key=lambda robot: robot.confidence.confidence)[-1]
-        self.robot_position_groundtruth = robot_msg.bb.center.position
+
+        temp = self.robot_position_true_queue.pop()
+        self.robot_position_groundtruth = temp[1].pose.pose.position
         point_1 = (self.robot_position_groundtruth.x,
                    self.robot_position_groundtruth.y)
         point_2 = (self.robot_position_filtered.x,
                    self.robot_position_filtered.y)
         distance = math.dist(point_1, point_2)
-        print("error: " + str(distance))
         # distances are added up to create average value later
         self.error_sum += distance
         self.current_filter_cycle += 1
@@ -185,6 +183,10 @@ def objective(trial) -> float:
     # suggest parameter values
     f = open('data.json')
     data = json.load(f)
+    if args.debug == 'True':
+        debug_var = ''
+    else:
+        debug_var = '> /dev/null 2>&1'
     for parameter in data["parameters"]:
         temp = None
         if parameter["type"] == "int":
@@ -193,15 +195,16 @@ def objective(trial) -> float:
             temp = trial.suggest_float(parameter["name"], parameter["min"], parameter["max"])
         elif parameter["type"] == "categorical":
             temp = trial.suggest_categorical(parameter["name"], parameter["choices"])
-        print("Suggestion for " + parameter["name"] + ": " + str(temp))
-        os.system("ros2 param set /bitbots_ball_filter " + parameter["name"] + " " + str(temp))
+        if args.debug == 'True':
+            print("Suggestion for " + parameter["name"] + ": " + str(temp))
+        os.system("ros2 param set /bitbots_ball_filter {} {} {}".format(parameter["name"], str(temp), debug_var))
     f.close()
     # start filter optimizer
     # todo
     rclpy.init()
     filter_optimizer = FilterOptimizer()
     try:
-        while filter_optimizer.get_filter_cycles() < 10 and not filter_optimizer.get_stop_trial():
+        while filter_optimizer.get_filter_cycles() < args.cycles and not filter_optimizer.get_stop_trial():
             rclpy.spin_once(filter_optimizer)
     except KeyboardInterrupt:
         filter_optimizer.destroy_node()
@@ -214,10 +217,10 @@ def objective(trial) -> float:
     # return evaluation value
     return average_error
 
-
-if __name__ == '__main__':
+def main(args):
     #todo
-
+    if args.debug == 'True':
+        print("Debug enabled")
     # p_des_1 = [trajectory.points[i].positions[0] for i in range(len(trajectory.points))]
     # t_des = [trajectory.points[i].time_from_start.sec + trajectory.points[i].time_from_start.nanosec*1e-9 for i in range(len(trajectory.points))]
 
@@ -229,7 +232,7 @@ if __name__ == '__main__':
     study = optuna.create_study()
     # start study with set number of trials
     try:
-        study.optimize(objective, n_trials=10)
+        study.optimize(objective, n_trials=args.trials)
     except KeyboardInterrupt:
         print("Keyboard interrupt. Aborting optimization study")
 
@@ -264,9 +267,9 @@ if __name__ == '__main__':
                     "max": parameter_max,
                     "result": best_params[parameter_name]
                 })
-            print("Found {}. Best value is: {}".format(parameter_name, best_params[parameter_name]))
+            if args.debug == 'True':
+                print("Found {}. Best value is: {}".format(parameter_name, best_params[parameter_name]))
         num_previous_trials = len(data2['trial_outputs'])
-        print(num_previous_trials)
         trial_output = {
             "trial_number": num_previous_trials,
             "parameters": parameters
@@ -274,6 +277,25 @@ if __name__ == '__main__':
         data2['trial_outputs'].append(trial_output)
         json.dump(data2, f3, indent=4)
 
-
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser("Optimizes parameters of a tracking filter")
+    parser.add_argument(
+        '--debug',
+        type=str,
+        default='False',
+        help="Whether debug messages should be printed")
+    parser.add_argument(
+        '--trials',
+        type=int,
+        default='10',
+        help="Number of Optuna trials")
+    parser.add_argument(
+        '--cycles',
+        type=int,
+        default='100',
+        help="Max amount of filter cycles per trial")
+    args = parser.parse_args()
+    print(args)
+    main(args)
 
 

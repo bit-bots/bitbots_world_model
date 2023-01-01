@@ -70,3 +70,8 @@ bitbots_ball_filter:
     # todo are these really x and y?
     robot_transition_modifier_x: 5.0 #1.0
     robot_transition_modifier_y: 5.0 #1.0
+
+    # Optimizer parameters:
+    # todo this doesn't work yet
+    max_filter_cycles: 100
+    optuna_trials: 10
