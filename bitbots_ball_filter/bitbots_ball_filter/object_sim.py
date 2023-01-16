@@ -14,6 +14,7 @@ class SimObject(Node):
         self.logger = self.get_logger()
         self.object_type = object_type
         self.logger.info('Created object_sim_node with object type: ' + self.object_type)
+        #self.num_of_objects = 1
 
         # Simulation timings
         self.pub_frequency = 20
@@ -25,6 +26,11 @@ class SimObject(Node):
         self.max_error = np.array([1, 1])
 
         # Initialize velocity and position
+        # self.velocity_array = []
+        # self.position_array = []
+        # for i in range(self.num_of_objects):
+        #     self.velocity_array.append(np.zeros((2)))
+        #     self.position_array.append(np.zeros((2))) #todo use np.random.rand() for random starting position
         self.velocity = np.zeros((2))
         self.position = np.zeros((2))
 
@@ -42,15 +48,22 @@ class SimObject(Node):
 
     def step(self):
         # Step the object
-        self.velocity = np.clip(self.velocity + self.gen_acceleration() * self.dt, -self.max_velocity,
-                                self.max_velocity)
+        # Adjust velocity and position of each object:
+        # for i in range(self.num_of_objects):
+        #     self.velocity_array[i] = np.clip(self.velocity + self.gen_acceleration() * self.dt, -self.max_velocity,
+        #                         self.max_velocity)
+        #     self.position_array[i] += self.velocity_array[i] * self.dt
+        #
+        #     p_err = self.position_array[i] + self.gen_error()
+
+        self.velocity = np.clip(self.velocity + self.gen_acceleration()  * self.dt, -self.max_velocity, self.max_velocity)
         self.position += self.velocity * self.dt
         p_err = self.position + self.gen_error()
 
-        # Publish results
-        self.pub_pos_viz.publish(self.gen_pose_cov_stamped_msg(self.position[0], self.position[1]))
-        self.pub_pos_err_viz.publish(self.gen_pose_cov_stamped_msg(p_err[0], p_err[1]))
-        # check with object type should be published
+            # Publish results
+        self.pub_pos_viz.publish(self.gen_pose_cov_stamped_msg(self.position[0], self.position[1])) #todo pub pose arrays
+        self.pub_pos_err_viz.publish(self.gen_pose_cov_stamped_msg(p_err[0], p_err[1])) #todo pub pose arrays
+            # check with object type should be published
         if self.object_type == 'ball':
             self.pub_pos_err.publish(self.gen_ball_array_msg(p_err[0], p_err[1]))
         elif self.object_type == 'robot':

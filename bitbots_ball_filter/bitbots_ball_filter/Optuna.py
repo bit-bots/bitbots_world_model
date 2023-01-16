@@ -25,7 +25,7 @@ class FilterOptimizer(Node):
         self.robot_position_groundtruth = None
         self.robot_position_filtered = None
 
-        # setup subscriber for ground truth robot positions: todo not necessary
+        # setup subscriber for ground truth robot positions: todo not necessary todo really?
         self.subscriber_robots_relative_groundtruth = self.create_subscription(
             RobotArray,
             "robots_relative",  # todo is relative really the ground truth?
@@ -42,7 +42,7 @@ class FilterOptimizer(Node):
             1
         )
 
-        # setup publisher for robto relative with noise from rosbag:
+        # setup publisher for robot relative with noise from rosbag:
         self.robot_position_err_publisher = self.create_publisher( #todo
             RobotArray,
             'robots_relative',
@@ -116,7 +116,7 @@ class FilterOptimizer(Node):
         # calculates the error based on the distance between last ground truth of the robot positions and the current filtered robot positions
         # todo is this correct?
 
-        temp = self.robot_position_true_queue.pop()
+        temp = self.robot_position_true_queue[0]
         self.robot_position_groundtruth = temp[1].pose.pose.position
         point_1 = (self.robot_position_groundtruth.x,
                    self.robot_position_groundtruth.y)
