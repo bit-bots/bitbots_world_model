@@ -4,9 +4,10 @@ import rclpy
 import math
 import json
 import argparse
+import numpy as np
 from rclpy.node import Node
 from geometry_msgs.msg import PoseWithCovarianceStamped
-from soccer_vision_3d_msgs.msg import RobotArray
+from soccer_vision_3d_msgs.msg import RobotArray, Robot
 import sqlite3
 from rosidl_runtime_py.utilities import get_message
 from rclpy.serialization import deserialize_message
@@ -21,9 +22,10 @@ class FilterOptimizer(Node):
         self.error_sum = 0
         self.stop_trial = False
         self.current_robot_relative_err_msg = None
-        self.robot_relative_err_queue = []  # initializing queue
+        self.robot_msg_err_queue = []  # initializing queue
         self.robot_position_groundtruth = None
         self.robot_position_filtered = None
+        self.robot_position_true_queue = []
 
         # setup subscriber for ground truth robot positions: todo not necessary todo really?
         self.subscriber_robots_relative_groundtruth = self.create_subscription(
@@ -49,47 +51,23 @@ class FilterOptimizer(Node):
             1
         )
 
-
         # reset filter:
         # todo get reset service name from config
         # robot_filter_reset_service_name = "ball_filter_reset"
         # os.system("ros2 service call /{} std_srvs/Trigger".format(robot_filter_reset_service_name))
 
-        # unpack rosbag:
-        # bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
-        self.logger.info("Unpacking bag")
-        bag_file = '/home/hendrik/Documents/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
-        parser = BagFileParser(bag_file)
-        # todo am I doing this the wrong way around? is this actually getting the last msg first?
-        self.robot_relative_err_queue = parser.get_messages("/robots_relative")
-        self.robot_position_true_queue = parser.get_messages("/position")
-        # todo get the non-err positions out of it for distance calculation
-
-
-        # create reader instance and open for reading
-        # bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/' \
-        #            'rosbag2_2022_12_13-12_34_57_0.db3'
-        # with Reader('/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0') as reader:
-        #     for msg in reader.messages():
-        #         pass
-                #print(msg)
-                #https://gitlab.com/ternaris/rosbags/-/blob/master/src/rosbags/interfaces/__init__.py
-            # for connection, timestamp, rawdata in reader.messages(['/position']):
-            #     msg = deserialize_cdr(rawdata, connection.msgtype)
-            #     print(msg.header.frame_id)
-        #self.robot_groundtruth_queue.append()
-        # todo bag name from config or somehting?
-        # todo unpack bag
-        self.logger.info("RobotOptimizer initialised")
+    def startup(self, robot_position_true_queue, robot_msg_err_queue):
+        self.robot_position_true_queue = robot_position_true_queue
+        self.robot_msg_err_queue = robot_msg_err_queue
         self.publish_robot_position_err()
 
     def publish_robot_position_err(self):
         """
         pops first message from the message queue created out of the rosbag and publishes it
         """
-        if len(self.robot_relative_err_queue) > 0:
-            self.current_robot_relative_err_msg = self.robot_relative_err_queue.pop()
-            self.robot_position_err_publisher.publish(self.current_robot_relative_err_msg[1])  # the msg is a tuple of time stamp + msg
+        if len(self.robot_msg_err_queue) > 0:
+            self.current_robot_relative_err_msg = self.robot_msg_err_queue.pop()
+            self.robot_position_err_publisher.publish(self.current_robot_relative_err_msg)  # the msg is a tuple of time stamp + msg
         else:
             self.logger.warn("Ran out of messages to publish. Stopping trial")
             self.stop_trial = True
@@ -180,6 +158,12 @@ def objective(trial) -> float:
     param trial: Optuna trial object
     """
 
+    use_noise = True
+    # bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
+    bag_file = '/home/hendrik/Documents/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'    # todo bag name from config or somehting?
+    robot_position_true_queue, robot_msg_err_queue = generate_msgs(use_noise, bag_file)
+
+
     # suggest parameter values
     f = open('data.json')
     data = json.load(f)
@@ -203,6 +187,7 @@ def objective(trial) -> float:
     # todo
     rclpy.init()
     filter_optimizer = FilterOptimizer()
+    filter_optimizer.startup(robot_position_true_queue, robot_msg_err_queue)
     try:
         while filter_optimizer.get_filter_cycles() < args.cycles and not filter_optimizer.get_stop_trial():
             rclpy.spin_once(filter_optimizer)
@@ -217,16 +202,58 @@ def objective(trial) -> float:
     # return evaluation value
     return average_error
 
+def generate_msgs(use_noise, bag_file):
+    # unpack rosbag:
+    print("Unpacking bag")
+
+    bag_parser = BagFileParser(bag_file)
+    robot_msg_err_queue = []
+    robot_position_true_queue = bag_parser.get_messages("/position")     # todo am I doing this the wrong way around? is this actually getting the last msg first?
+    if not use_noise:
+        robot_msg_err_queue = bag_parser.get_messages("/robots_relative")
+    else:
+        noise_array = []
+        for i in range(0, len(robot_position_true_queue)):
+            # generate
+            max_error = np.array([1, 1])
+            error = np.multiply(np.random.rand(2) * 2 - 1, max_error)
+            noise_array.append(error)
+            groundtruth_msg = robot_position_true_queue[i][1]  # takes the msg from the timestamp + msg tuple
+            p_err = [groundtruth_msg.pose.pose.position.x,
+                     groundtruth_msg.pose.pose.position.y] + error
+            robot_msg_err_queue.append(gen_robot_array_msg(p_err[0], p_err[1], groundtruth_msg.header.stamp))
+
+    print("Message extraction finished")
+    return robot_position_true_queue, robot_msg_err_queue
+
+def gen_robot_array_msg(x, y, timestamp):#todo better values
+    object_msg = Robot()
+    object_msg.bb.center.position.x = x
+    object_msg.bb.center.position.y = y
+    object_msg.bb.center.position.z = 0.0
+    object_msg.bb.center.orientation.x = 0.0
+    object_msg.bb.center.orientation.y = 0.0
+    object_msg.bb.center.orientation.z = 0.0
+    object_msg.bb.center.orientation.w = 0.0
+    object_msg.bb.size.x = 1.0
+    object_msg.bb.size.y = 1.0
+    object_msg.bb.size.z = 1.0
+    object_msg.attributes.player_number = 0
+    object_msg.attributes.team = 0
+    object_msg.attributes.state = 0
+    object_msg.attributes.facing = 0
+    object_msg.confidence.confidence = 0.9
+
+    object_array_msg = RobotArray()
+    object_array_msg.header.stamp = timestamp
+    object_array_msg.header.frame_id = 'odom'
+    object_array_msg.robots.append(object_msg)
+    return object_array_msg
+
 def main(args):
     #todo
     if args.debug == 'True':
         print("Debug enabled")
-    # p_des_1 = [trajectory.points[i].positions[0] for i in range(len(trajectory.points))]
-    # t_des = [trajectory.points[i].time_from_start.sec + trajectory.points[i].time_from_start.nanosec*1e-9 for i in range(len(trajectory.points))]
-
-    # plt.plot(t_des, p_des_1)
-    #
-    # plt.show()
 
     # create study:
     study = optuna.create_study()
