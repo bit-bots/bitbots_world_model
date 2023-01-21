@@ -16,117 +16,121 @@ import matplotlib.pyplot as plt
 
 class TrialOptimizer(Node):
     def __init__(self) -> None:
-        super().__init__('robot_optimizer')
+        super().__init__('trial_optimizer')
         self.logger = self.get_logger()
         self.current_filter_cycle = 1  # todo change this to 0 again
         self.error_sum = 0
         self.stop_trial = False
-        self.current_robot_relative_err_msg = None
-        self.robot_msg_err_queue = []  # initializing queue
-        self.robot_position_groundtruth = None
-        self.robot_position_filtered = None
-        self.robot_position_true_queue = []
+        self.use_debug = use_debug
 
-        # setup subscriber for ground truth robot positions: todo not necessary todo really?
-        self.subscriber_robots_relative_groundtruth = self.create_subscription(
-            RobotArray,
-            "robots_relative",  # todo is relative really the ground truth?
-            self.robots_relative_groundtruth_callback,
-            1
-        )
+        self.robot_groundtruth_msg_queue = robot_position_true_queue
+        self.robot_detection_msg_queue = robot_msg_err_queue
+        self.current_robot_groundtruth_position = None
+        self.current_robot_groundtruth_msg = None
+        self.current_robot_detection_msg = None
+        self.current_robot_filtered_position = None
+        self.current_robot_filtered_msg = None
+
+        self.optimizer_rate = 60 # todo get from config
+        self.optimizer_time_step = 1.0 / self.optimizer_rate
+        self.use_timer = True
 
         # setup subscriber for filtered robot positions:
-        # todo this might become an array or a different type once I publish multiple filters
-        self.subscriber_robots_relative_filtered = self.create_subscription(
+        self.robot_position_filtered_subscriber = self.create_subscription(
             PoseWithCovarianceStamped,
             "robot_position_relative_filtered",
-            self.robots_relative_filtered_callback,
+            self.robot_position_filtered_callback,
             1
         )
 
-        # setup publisher for robot relative with noise from rosbag:
-        self.robot_position_err_publisher = self.create_publisher( #todo
+        # setup publisher for robot detection with noise:
+        self.robot_position_detection_publisher = self.create_publisher(
             RobotArray,
             'robots_relative',
             1
         )
 
         # reset filter:
-        # todo get reset service name from config
+        # todo get reset service name from config and reset filter before starting new trial
         # robot_filter_reset_service_name = "ball_filter_reset"
         # os.system("ros2 service call /{} std_srvs/Trigger".format(robot_filter_reset_service_name))
 
-    def startup(self, robot_position_true_queue, robot_msg_err_queue):
-        self.robot_position_true_queue = robot_position_true_queue
-        self.robot_msg_err_queue = robot_msg_err_queue
-        self.publish_robot_position_err()
+        if self.use_debug == 'True':
+            print('...initialization finished')
 
-    def publish_robot_position_err(self):
+        # either create a timer to step at a fixed rate or only step when a response from the filter is received:
+        if self.use_timer:
+            self.optimizer_timer = self.create_timer(self.optimizer_time_step, self.optimizer_step)
+        else:
+            self.optimizer_step()
+
+    def optimizer_step(self):
         """
-        pops first message from the message queue created out of the rosbag and publishes it
+        Performs an optimizer step in which the groundtruth and noisy detected position are advanced
+        with the latter one being published to be filtered.
         """
-        if len(self.robot_msg_err_queue) > 0:
-            self.current_robot_relative_err_msg = self.robot_msg_err_queue.pop()
-            self.robot_position_err_publisher.publish(self.current_robot_relative_err_msg)  # the msg is a tuple of time stamp + msg
+        if self.use_debug  == 'True':
+            print('stepping optimizer')
+        if len(self.robot_detection_msg_queue) > 0 and len(self.robot_groundtruth_msg_queue) > 0:
+            # the elements in the que are tuple of time stamp + msg
+
+            self.current_robot_groundtruth_msg = self.robot_groundtruth_msg_queue.pop()[1]
+            self.current_robot_detection_msg = self.robot_detection_msg_queue.pop()[1]
+            self.robot_position_detection_publisher.publish(self.current_robot_detection_msg)
         else:
             self.logger.warn("Ran out of messages to publish. Stopping trial")
             self.stop_trial = True
 
-    def robots_relative_groundtruth_callback(self, robots_relative_groundtruth) -> None: # todo no necessary anymore
+    def robot_position_filtered_callback(self, robots_relative_filtered) -> None:
         """
-        receives and saves the last value for the ground truth of the robot positions
+        Receives and saves the last value for the filtered robot data.
 
-        param robots_relative_groundtruth: ground truth of robot data
+        param robots_relative_filtered: Filtered robot data.
         """
-        # todo deal with multiple robots instead of just choosing one
-        robot = sorted(robots_relative_groundtruth.robots, key=lambda robot: robot.confidence.confidence)[-1]
-        self.robot_position_groundtruth = robot.bb.center.position
+        if self.use_debug  == 'True':
+            print('handling filtered msg callback')
 
-    def robots_relative_filtered_callback(self, robots_relative_filtered) -> None:
-        """
-        receives and saves the last value for the filtered robot data
+        self.current_robot_filtered_msg = robots_relative_filtered
+        self.current_robot_filtered_position = self.current_robot_filtered_msg.pose.pose.position
 
-        param robots_relative_filtered: filtered robot data
-        """
-        # todo deal with multiple robots
-        self.robot_position_filtered = robots_relative_filtered.pose.pose.position
+        # calculates the error based on the distance between last groundtruth and the current filtered robot position:
+        self.current_robot_groundtruth_position = self.current_robot_groundtruth_msg.pose.pose.position
 
-        # calculates the error based on the distance between last ground truth of the robot positions and the current filtered robot positions
-        # todo is this correct?
-
-        temp = self.robot_position_true_queue[0]
-        self.robot_position_groundtruth = temp[1].pose.pose.position
-        point_1 = (self.robot_position_groundtruth.x,
-                   self.robot_position_groundtruth.y)
-        point_2 = (self.robot_position_filtered.x,
-                   self.robot_position_filtered.y)
+        #groundtruth = self.current_robot_groundtruth_position[1]
+        point_1 = (self.current_robot_groundtruth_position.x,
+                   self.current_robot_groundtruth_position.y)
+        point_2 = (self.current_robot_filtered_position.x,
+                   self.current_robot_filtered_position.y)
         distance = math.dist(point_1, point_2)
+
         # distances are added up to create average value later
         self.error_sum += distance
         self.current_filter_cycle += 1
 
-        self.publish_robot_position_err()
+        # step optimizer manually if it doesn't run on timer:
+        if not self.use_timer:
+            self.optimizer_step()
 
 
     def get_filter_cycles(self) -> int:
         """
-        returns number of filter cycles that have been passed through
+        Returns number of filter cycles that have been passed through.
         """
         return self.current_filter_cycle
 
     def get_average_error(self) -> float:
         """
-        returns average error based on the distance between ground truth and filtered robot positions for this trial
+        Returns average error based on the distance between ground truth and filtered robot positions for this trial.
         """
         return self.error_sum / self.current_filter_cycle
 
     def get_stop_trial(self):
         """
-        returns boolean whether trial should be stopped prematurely
+        Returns boolean whether trial should be stopped prematurely.
         """
         return self.stop_trial
 
-class BagFileParser():
+class BagFileParser:
     def __init__(self, bag_file):
         self.conn = sqlite3.connect(bag_file)
         self.cursor = self.conn.cursor()
@@ -149,78 +153,96 @@ class BagFileParser():
         # Deserialise all and timestamp them
         return [ (timestamp,deserialize_message(data, self.topic_msg_message[topic_name])) for timestamp,data in rows]
 
-def objective(self, trial) -> float:
+def objective(trial) -> float:
     """
     Optuna's objective function that runs through a trial, tries out parameter values
-    and calculates the evaluation value
+    and calculates the evaluation value.
 
-    param trial: Optuna trial object
+    param trial: Optuna trial object.
     """
 
     # suggest parameter values
-    data_file = open('data.json')
-    data = json.load(data_file)
-    if args.debug == 'True':
+    if use_debug == 'True':
         debug_var = ''
     else:
         debug_var = '> /dev/null 2>&1'
-    for parameter in data["parameters"]:
+    for input_parameter in data["parameters"]:
         temp = None
-        if parameter["type"] == "int":
-            temp = trial.suggest_int(parameter["name"], parameter["min"], parameter["max"])
-        elif parameter["type"] == "float":
-            temp = trial.suggest_float(parameter["name"], parameter["min"], parameter["max"])
-        elif parameter["type"] == "categorical":
-            temp = trial.suggest_categorical(parameter["name"], parameter["choices"])
-        if args.debug == 'True':
-            print("Suggestion for " + parameter["name"] + ": " + str(temp))
-        os.system("ros2 param set /bitbots_ball_filter {} {} {}".format(parameter["name"], str(temp), debug_var))
-    data_file.close()
+        if input_parameter["type"] == "int":
+            temp = trial.suggest_int(input_parameter["name"], input_parameter["min"], input_parameter["max"])
+        elif input_parameter["type"] == "float":
+            temp = trial.suggest_float(input_parameter["name"], input_parameter["min"], input_parameter["max"])
+        elif input_parameter["type"] == "categorical":
+            temp = trial.suggest_categorical(input_parameter["name"], input_parameter["choices"])
+        if use_debug == 'True':
+            print("Suggestion for " + input_parameter["name"] + ": " + str(temp))
+        # set the param values:
+        os.system("ros2 param set /bitbots_ball_filter {} {} {}".format(input_parameter["name"], str(temp), debug_var))
+
     # start filter optimizer
-    # todo
     rclpy.init()
-    filter_optimizer = TrialOptimizer()
-    filter_optimizer.startup(robot_position_true_queue, robot_msg_err_queue)
+    if use_debug == 'True':
+        print("Initializing trial optimizer...")
+    trial_optimizer = TrialOptimizer()
     try:
-        while filter_optimizer.get_filter_cycles() < args.cycles and not filter_optimizer.get_stop_trial():
-            rclpy.spin_once(filter_optimizer)
+        while trial_optimizer.get_filter_cycles() < args.cycles and not trial_optimizer.get_stop_trial():
+            if use_debug == 'True':
+                print('spinning')
+            rclpy.spin_once(trial_optimizer)
     except KeyboardInterrupt:
-        filter_optimizer.destroy_node()
+        trial_optimizer.destroy_node()
         rclpy.shutdown()
 
-    average_error = filter_optimizer.get_average_error()
-    filter_optimizer.destroy_node()
+    # cleanup:
+    average_error = trial_optimizer.get_average_error()
+    trial_optimizer.destroy_node()
     rclpy.shutdown()
 
     # return evaluation value
     return average_error
 
-def generate_msgs(use_noise, bag_file):
+def generate_msgs() -> None:
+    """
+    Extracts messages from rosbag and creates noisy detected positions from noise and the groundtruth if desired.
+
+    param bag_file: Source bag file containing the messages to be extracted.
+    param use_noise: Whether to generate noisy detected positions.
+    param max_error: The maximum error of the noise. Only necessary when use_noise is True.
+    """
     # unpack rosbag:
-    print("Unpacking bag")
+    if use_debug == 'True':
+        print("Unpacking bag")
     bag_parser = BagFileParser(bag_file)
     # extract groundtruth:
-    robot_position_true_queue = bag_parser.get_messages("/position")     # todo am I doing this the wrong way around? is this actually getting the last msg first?
+    for msg in bag_parser.get_messages("/position"):
+        robot_position_true_queue.append(msg)
     # extract noisy position:
-    noise_array = []
-    if not use_noise:
+    if use_noise != 'True':
         # use available noisy position:
-        robot_msg_err_queue = bag_parser.get_messages("/robots_relative")
+        for msg in bag_parser.get_messages("/robots_relative"):
+            robot_msg_err_queue.append(msg)
     else:
         # generate own noisy position:
-        robot_msg_err_queue = []
         for i in range(0, len(robot_position_true_queue)):
-            max_error = np.array([1, 1])
             error = np.multiply(np.random.rand(2) * 2 - 1, max_error)
-            noise_array.append(error)  # save error for later visualization
+            noise_array.append(error.tolist())  # save error for later visualization
             groundtruth_msg = robot_position_true_queue[i][1]  # takes the msg from the timestamp + msg tuple
             p_err = [groundtruth_msg.pose.pose.position.x,
                      groundtruth_msg.pose.pose.position.y] + error
-            robot_msg_err_queue.append(gen_robot_array_msg(p_err[0], p_err[1], groundtruth_msg.header.stamp))
-    print("Message extraction finished")
-    return robot_position_true_queue, robot_msg_err_queue, noise_array
+            msg_tuple = [robot_position_true_queue[i][0],
+                     gen_robot_array_msg(p_err[0], p_err[1], groundtruth_msg.header.stamp)]
+            robot_msg_err_queue.append(msg_tuple)
+    if use_debug == 'True':
+        print("Message extraction finished")
 
-def gen_robot_array_msg(x, y, timestamp):#todo better values
+def gen_robot_array_msg(x, y, timestamp) -> RobotArray:
+    """
+    Generates a RobotArray message that contains one robot.
+
+    param x: Position of the robot on the x-axis.
+    param y: Position of the robot on the y-axis.
+    param timestamp: Timestamp of the source message.
+    """
     object_msg = Robot()
     object_msg.bb.center.position.x = x
     object_msg.bb.center.position.y = y
@@ -255,28 +277,40 @@ if __name__ == '__main__':
     parser.add_argument(
         '--trials',
         type=int,
-        default='10',
+        default='2',
         help="Number of Optuna trials")
     parser.add_argument(
         '--cycles',
         type=int,
         default='100',
         help="Max amount of filter cycles per trial")
+    parser.add_argument(
+        '--noise',
+        type=str,
+        default=False,
+        help='Adds noise to the groundtruth position from the rosbag to create detected position '
+             'that is used in optimization and logs the noise. '
+             'Otherwise the noisy detected position from the rosbag is used')
     args = parser.parse_args()
     print(args)
 
     # configuration:
-    if args.debug == 'True':
-        print("Debug enabled")
-    use_noise = True
+    use_noise = args.noise
+    use_debug = args.debug
+    max_error = np.array([1,1])
+    noise_array = []
+    robot_msg_err_queue = []
+    robot_position_true_queue = []
     # bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
     bag_file = '/home/hendrik/Documents/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'    # todo bag name from config or somehting?
+    if use_debug == 'True':
+        print("Debug enabled")
 
     # pre-calculation:
-    robot_position_true_queue, robot_msg_err_queue, noise_array = generate_msgs(use_noise, bag_file)
-    with open('data.json') as data_file:
-        data = json.load(data_file)
-    data_file.close()
+    generate_msgs()
+    with open('data.json') as f1:
+        data = json.load(f1)
+    f1.close()
 
     # create study:
     study = optuna.create_study()
@@ -287,11 +321,14 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print("Keyboard interrupt. Aborting optimization study")
 
-    best_params = study.best_params
-
     # Save best parameter values to output file:
+    best_params = study.best_params
     with open('output_data.json', 'r') as f2:
-        data2 = json.load(f2)
+        output_data = json.load(f2)
+    f2.close()
+
+    print(noise_array)
+
     with open('output_data.json', 'w') as f3:
         parameters = []
         for parameter in data["parameters"]:
@@ -315,16 +352,17 @@ if __name__ == '__main__':
                     "max": parameter_max,
                     "result": best_params[parameter_name]
                 })
-            if args.debug == 'True':
+            if use_debug == 'True':
                 print("Found {}. Best value is: {}".format(parameter_name, best_params[parameter_name]))
-        num_previous_trials = len(data2['trial_outputs'])
+        num_previous_trials = len(output_data['trial_outputs'])
         trial_output = {
             "trial_number": num_previous_trials,
             "noise_array": noise_array,
             "parameters": parameters
         }
-        data2['trial_outputs'].append(trial_output)
-        json.dump(data2, f3, indent=4)
+        output_data['trial_outputs'].append(trial_output)
+        json.dump(output_data, f3, indent=4)
+    f3.close()
 
 
 
