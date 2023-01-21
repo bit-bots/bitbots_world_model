@@ -14,7 +14,7 @@ from rclpy.serialization import deserialize_message
 import matplotlib.pyplot as plt
 
 
-class FilterOptimizer(Node):
+class TrialOptimizer(Node):
     def __init__(self) -> None:
         super().__init__('robot_optimizer')
         self.logger = self.get_logger()
@@ -149,8 +149,7 @@ class BagFileParser():
         # Deserialise all and timestamp them
         return [ (timestamp,deserialize_message(data, self.topic_msg_message[topic_name])) for timestamp,data in rows]
 
-
-def objective(trial) -> float:
+def objective(self, trial) -> float:
     """
     Optuna's objective function that runs through a trial, tries out parameter values
     and calculates the evaluation value
@@ -158,15 +157,9 @@ def objective(trial) -> float:
     param trial: Optuna trial object
     """
 
-    use_noise = True
-    # bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
-    bag_file = '/home/hendrik/Documents/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'    # todo bag name from config or somehting?
-    robot_position_true_queue, robot_msg_err_queue = generate_msgs(use_noise, bag_file)
-
-
     # suggest parameter values
-    f = open('data.json')
-    data = json.load(f)
+    data_file = open('data.json')
+    data = json.load(data_file)
     if args.debug == 'True':
         debug_var = ''
     else:
@@ -182,11 +175,11 @@ def objective(trial) -> float:
         if args.debug == 'True':
             print("Suggestion for " + parameter["name"] + ": " + str(temp))
         os.system("ros2 param set /bitbots_ball_filter {} {} {}".format(parameter["name"], str(temp), debug_var))
-    f.close()
+    data_file.close()
     # start filter optimizer
     # todo
     rclpy.init()
-    filter_optimizer = FilterOptimizer()
+    filter_optimizer = TrialOptimizer()
     filter_optimizer.startup(robot_position_true_queue, robot_msg_err_queue)
     try:
         while filter_optimizer.get_filter_cycles() < args.cycles and not filter_optimizer.get_stop_trial():
@@ -205,26 +198,27 @@ def objective(trial) -> float:
 def generate_msgs(use_noise, bag_file):
     # unpack rosbag:
     print("Unpacking bag")
-
     bag_parser = BagFileParser(bag_file)
-    robot_msg_err_queue = []
+    # extract groundtruth:
     robot_position_true_queue = bag_parser.get_messages("/position")     # todo am I doing this the wrong way around? is this actually getting the last msg first?
+    # extract noisy position:
+    noise_array = []
     if not use_noise:
+        # use available noisy position:
         robot_msg_err_queue = bag_parser.get_messages("/robots_relative")
     else:
-        noise_array = []
+        # generate own noisy position:
+        robot_msg_err_queue = []
         for i in range(0, len(robot_position_true_queue)):
-            # generate
             max_error = np.array([1, 1])
             error = np.multiply(np.random.rand(2) * 2 - 1, max_error)
-            noise_array.append(error)
+            noise_array.append(error)  # save error for later visualization
             groundtruth_msg = robot_position_true_queue[i][1]  # takes the msg from the timestamp + msg tuple
             p_err = [groundtruth_msg.pose.pose.position.x,
                      groundtruth_msg.pose.pose.position.y] + error
             robot_msg_err_queue.append(gen_robot_array_msg(p_err[0], p_err[1], groundtruth_msg.header.stamp))
-
     print("Message extraction finished")
-    return robot_position_true_queue, robot_msg_err_queue
+    return robot_position_true_queue, robot_msg_err_queue, noise_array
 
 def gen_robot_array_msg(x, y, timestamp):#todo better values
     object_msg = Robot()
@@ -250,25 +244,52 @@ def gen_robot_array_msg(x, y, timestamp):#todo better values
     object_array_msg.robots.append(object_msg)
     return object_array_msg
 
-def main(args):
-    #todo
+if __name__ == '__main__':
+    # argument parsing:
+    parser = argparse.ArgumentParser("Optimizes parameters of a tracking filter")
+    parser.add_argument(
+        '--debug',
+        type=str,
+        default='False',
+        help="Whether debug messages should be printed")
+    parser.add_argument(
+        '--trials',
+        type=int,
+        default='10',
+        help="Number of Optuna trials")
+    parser.add_argument(
+        '--cycles',
+        type=int,
+        default='100',
+        help="Max amount of filter cycles per trial")
+    args = parser.parse_args()
+    print(args)
+
+    # configuration:
     if args.debug == 'True':
         print("Debug enabled")
+    use_noise = True
+    # bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
+    bag_file = '/home/hendrik/Documents/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'    # todo bag name from config or somehting?
+
+    # pre-calculation:
+    robot_position_true_queue, robot_msg_err_queue, noise_array = generate_msgs(use_noise, bag_file)
+    with open('data.json') as data_file:
+        data = json.load(data_file)
+    data_file.close()
 
     # create study:
     study = optuna.create_study()
-    # start study with set number of trials
+
+    # start study with set number of trials:
     try:
         study.optimize(objective, n_trials=args.trials)
     except KeyboardInterrupt:
         print("Keyboard interrupt. Aborting optimization study")
 
-    # todo proper debug:
     best_params = study.best_params
 
     # Save best parameter values to output file:
-    with open('data.json') as f:
-        data = json.load(f)
     with open('output_data.json', 'r') as f2:
         data2 = json.load(f2)
     with open('output_data.json', 'w') as f3:
@@ -299,30 +320,12 @@ def main(args):
         num_previous_trials = len(data2['trial_outputs'])
         trial_output = {
             "trial_number": num_previous_trials,
+            "noise_array": noise_array,
             "parameters": parameters
         }
         data2['trial_outputs'].append(trial_output)
         json.dump(data2, f3, indent=4)
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser("Optimizes parameters of a tracking filter")
-    parser.add_argument(
-        '--debug',
-        type=str,
-        default='False',
-        help="Whether debug messages should be printed")
-    parser.add_argument(
-        '--trials',
-        type=int,
-        default='10',
-        help="Number of Optuna trials")
-    parser.add_argument(
-        '--cycles',
-        type=int,
-        default='100',
-        help="Max amount of filter cycles per trial")
-    args = parser.parse_args()
-    print(args)
-    main(args)
+
 
 
