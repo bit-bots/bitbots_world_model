@@ -81,11 +81,11 @@ class Visualizer(Node):
         with open('output_data.json', 'r') as f1:
             self.output_data = json.load(f1)
         f1.close()
-        if self.trial_number == -1 or self.trial_number > len(self.output_data['trial_outputs']) - 1:
-            trial = self.output_data['trial_outputs'][
-                len(self.output_data['trial_outputs']) - 1]
+        if self.trial_number == -1 or self.trial_number > len(self.output_data['study_outputs']) - 1:
+            trial = self.output_data['study_outputs'][
+                len(self.output_data['study_outputs']) - 1]
         else:
-            trial = self.output_data['trial_outputs'][self.trial_number]
+            trial = self.output_data['study_outputs'][self.trial_number]
         self.noise_array = trial['noise_array']
         if len(self.noise_array) == 0:
             self.use_noise_data = False

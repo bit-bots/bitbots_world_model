@@ -1,7 +1,7 @@
 {
-    "trial_outputs": [
+    "study_outputs": [
         {
-            "trial_number": 0,
+            "study_number": 0,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -71,7 +71,7 @@
             ]
         },
         {
-            "trial_number": 1,
+            "study_number": 1,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -141,7 +141,7 @@
             ]
         },
         {
-            "trial_number": 2,
+            "study_number": 2,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -211,7 +211,7 @@
             ]
         },
         {
-            "trial_number": 3,
+            "study_number": 3,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -281,7 +281,7 @@
             ]
         },
         {
-            "trial_number": 4,
+            "study_number": 4,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -351,7 +351,7 @@
             ]
         },
         {
-            "trial_number": 5,
+            "study_number": 5,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -421,7 +421,7 @@
             ]
         },
         {
-            "trial_number": 6,
+            "study_number": 6,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -491,7 +491,7 @@
             ]
         },
         {
-            "trial_number": 7,
+            "study_number": 7,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -561,7 +561,7 @@
             ]
         },
         {
-            "trial_number": 8,
+            "study_number": 8,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -631,7 +631,7 @@
             ]
         },
         {
-            "trial_number": 9,
+            "study_number": 9,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -701,7 +701,7 @@
             ]
         },
         {
-            "trial_number": 10,
+            "study_number": 10,
             "parameters": [
                 {
                     "name": "robot_velocity_reduction_x",
@@ -771,7 +771,7 @@
             ]
         },
         {
-            "trial_number": 11,
+            "study_number": 11,
             "noise_array": [],
             "parameters": [
                 {
@@ -842,7 +842,7 @@
             ]
         },
         {
-            "trial_number": 12,
+            "study_number": 12,
             "noise_array": [],
             "parameters": [
                 {
@@ -913,7 +913,7 @@
             ]
         },
         {
-            "trial_number": 13,
+            "study_number": 13,
             "noise_array": [
                 [
                     0.26457758708388157,
@@ -6893,7 +6893,7 @@
             ]
         },
         {
-            "trial_number": 14,
+            "study_number": 14,
             "noise_array": [
                 [
                     0.39514712412812325,
@@ -12873,7 +12873,7 @@
             ]
         },
         {
-            "trial_number": 15,
+            "study_number": 15,
             "noise_array": [],
             "parameters": [
                 {
@@ -12944,7 +12944,7 @@
             ]
         },
         {
-            "trial_number": 16,
+            "study_number": 16,
             "noise_array": [],
             "parameters": [
                 {
@@ -13015,7 +13015,7 @@
             ]
         },
         {
-            "trial_number": 17,
+            "study_number": 17,
             "noise_array": [],
             "parameters": [
                 {
@@ -13086,7 +13086,7 @@
             ]
         },
         {
-            "trial_number": 18,
+            "study_number": 18,
             "noise_array": [],
             "parameters": [
                 {
@@ -13139,6 +13139,81 @@
                         "False"
                     ],
                     "result": "False"
+                },
+                {
+                    "name": "robot_transition_modifier_x",
+                    "type": "float",
+                    "min": 5,
+                    "max": 5,
+                    "result": 5.0
+                },
+                {
+                    "name": "robot_transition_modifier_y",
+                    "type": "float",
+                    "min": 5,
+                    "max": 5,
+                    "result": 5.0
+                }
+            ]
+        },
+        {
+            "study_number": 19,
+            "noise_array": [],
+            "average_error_array": [
+                0.7402157963343602,
+                0.7403397731089424
+            ],
+            "parameters": [
+                {
+                    "name": "robot_velocity_reduction_x",
+                    "type": "float",
+                    "min": 0,
+                    "max": 10,
+                    "result": 8.414263658458612
+                },
+                {
+                    "name": "robot_velocity_reduction_y",
+                    "type": "float",
+                    "min": 0,
+                    "max": 10,
+                    "result": 5.079862897888031
+                },
+                {
+                    "name": "robot_process_noise_variance",
+                    "type": "float",
+                    "min": 0,
+                    "max": 0.1,
+                    "result": 0.03675135052226186
+                },
+                {
+                    "name": "robot_measurement_certainty",
+                    "type": "float",
+                    "min": 0,
+                    "max": 1,
+                    "result": 0.2714497277256247
+                },
+                {
+                    "name": "robot_filter_reset_time",
+                    "type": "int",
+                    "min": 1,
+                    "max": 40,
+                    "result": 15
+                },
+                {
+                    "name": "robot_filter_reset_distance",
+                    "type": "int",
+                    "min": 1,
+                    "max": 10,
+                    "result": 9
+                },
+                {
+                    "name": "robot_closest_distance_match",
+                    "type": "categorical",
+                    "choices": [
+                        "True",
+                        "False"
+                    ],
+                    "result": "True"
                 },
                 {
                     "name": "robot_transition_modifier_x",

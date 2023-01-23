@@ -186,8 +186,6 @@ def objective(trial) -> float:
     trial_optimizer = TrialOptimizer()
     try:
         while trial_optimizer.get_filter_cycles() < args.cycles and not trial_optimizer.get_stop_trial():
-            if use_debug == 'True':
-                print('spinning')
             rclpy.spin_once(trial_optimizer)
     except KeyboardInterrupt:
         trial_optimizer.destroy_node()
@@ -199,6 +197,7 @@ def objective(trial) -> float:
     rclpy.shutdown()
 
     # return evaluation value
+    average_error_array.append(average_error)
     return average_error
 
 def generate_msgs() -> None:
@@ -299,6 +298,7 @@ if __name__ == '__main__':
     use_debug = args.debug
     max_error = np.array([1,1])
     noise_array = []
+    average_error_array = []
     robot_msg_err_queue = []
     robot_position_true_queue = []
     # bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
@@ -354,13 +354,14 @@ if __name__ == '__main__':
                 })
             if use_debug == 'True':
                 print("Found {}. Best value is: {}".format(parameter_name, best_params[parameter_name]))
-        num_previous_trials = len(output_data['trial_outputs'])
+        num_previous_studies = len(output_data['study_outputs'])
         trial_output = {
-            "trial_number": num_previous_trials,
+            "study_number": num_previous_studies,
             "noise_array": noise_array,
+            "average_error_array": average_error_array,
             "parameters": parameters
         }
-        output_data['trial_outputs'].append(trial_output)
+        output_data['study_outputs'].append(trial_output)
         json.dump(output_data, f3, indent=4)
     f3.close()
 
