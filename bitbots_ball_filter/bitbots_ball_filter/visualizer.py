@@ -44,7 +44,7 @@ class Visualizer(Node):
         self.use_noise_data = True
         self.noise_array = []
         self.noise_array_counter = 0
-        self.trial_number = 14
+        self.trial_number = -1
         self.unfinished_truth = True
         self.unfinished_filtered = True
         self.unfinished_detected = True
@@ -91,6 +91,41 @@ class Visualizer(Node):
             self.use_noise_data = False
             print('ERROR: no noise data available, output will use normal detected messages')
         print("...initialization done")
+
+        # plot average error:
+        average_error_array = trial['average_error_array']
+        average_error_array_x = []
+        average_error_array_y = []
+        for i in range(0, len(average_error_array) - 1):
+            average_error_array_x.append(i)
+            average_error_array_y.append(average_error_array[i])
+        for i in range(0, len(average_error_array) - 3):
+            if average_error_array[i] != 999 and average_error_array[i+1] != 999:
+                self.ax.plot(
+                    average_error_array_x[i:i + 2],
+                    average_error_array_y[i:i + 2],
+                    c="blue",
+                    lw=1.5
+                )
+
+
+
+        # plt.plot(average_error_array_x, average_error_array_y,
+        #          label='average error',
+        #          lw=1.5,
+        #          c="blue")
+        #plt.xticks(range(0, len(average_error_array_y) + 1, 1))
+
+        plt.xlabel('x - axis')
+        plt.ylabel('y - axis')
+        plt.title('My first graph!')
+        plt.legend()
+        plt.show()
+
+        # todo remove for normal behaviour
+        self.unfinished_filtered = False
+        self.unfinished_truth = False
+        self.unfinished_detected = False
 
 
 
@@ -213,6 +248,7 @@ def main(args=None):
     visualizer.plot()
     visualizer.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()

@@ -5,6 +5,7 @@ import math
 import numpy as np
 import rclpy
 import tf2_ros as tf2
+import json
 
 from copy import deepcopy
 from filterpy.common import Q_discrete_white_noise
@@ -132,6 +133,12 @@ class ObjectFilter(Node):
         for param in config:
             tmp_config[param.name] = param.value
         config = tmp_config
+
+        if config['adjusted_params'] != "":
+            adjusted_params = json.loads(config['adjusted_params'])
+            for parameter, value in adjusted_params.items():
+                config['{}'.format(parameter)] = value
+                print("{}: {}".format(parameter, value))
 
         num_state_vars = 4  # 2 for position, 1 for direction and 1 for velocity
         num_measurement_inputs = 2 # todo?

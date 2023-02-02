@@ -16,7 +16,7 @@
         "name": "robot_process_noise_variance",
         "type": "float",
         "min": 0,
-        "max": 1
+        "max": 0.1
         },
         {
         "name": "robot_measurement_certainty",
@@ -28,7 +28,7 @@
         "name": "robot_filter_reset_time",
         "type": "int",
         "min": 1,
-        "max": 100
+        "max": 40
         },
         {
         "name": "robot_filter_reset_distance",
@@ -39,18 +39,18 @@
         {
         "name": "robot_closest_distance_match",
         "type": "categorical",
-        "choices": ["True"]
+        "choices": ["True", "False"]
         },
         {
         "name": "robot_transition_modifier_x",
         "type": "float",
-        "min": 0.1,
+        "min": 5,
         "max": 5
         },
         {
         "name": "robot_transition_modifier_y",
         "type": "float",
-        "min": 0.1,
+        "min": 5,
         "max": 5
         }
     ]

@@ -1,3 +1,5 @@
+import time
+
 import optuna
 import os
 import rclpy
@@ -18,13 +20,16 @@ class TrialOptimizer(Node):
     def __init__(self) -> None:
         super().__init__('trial_optimizer')
         self.logger = self.get_logger()
-        self.current_filter_cycle = 1  # todo change this to 0 again
+        self.current_filter_cycle = 0
+        self.current_optimizer_cycle = 0
         self.error_sum = 0
         self.stop_trial = False
         self.use_debug = use_debug
+        self.timeout_time_step = 60
+        self.timeout_incidents = 0
 
-        self.robot_groundtruth_msg_queue = robot_position_true_queue
-        self.robot_detection_msg_queue = robot_msg_err_queue
+        self.robot_groundtruth_msg_queue = robot_position_true_queue.copy()
+        self.robot_detection_msg_queue = robot_msg_err_queue.copy()
         self.current_robot_groundtruth_position = None
         self.current_robot_groundtruth_msg = None
         self.current_robot_detection_msg = None
@@ -55,8 +60,10 @@ class TrialOptimizer(Node):
         # robot_filter_reset_service_name = "ball_filter_reset"
         # os.system("ros2 service call /{} std_srvs/Trigger".format(robot_filter_reset_service_name))
 
-        if self.use_debug == 'True':
+        if self.use_debug:
             print('...initialization finished')
+
+        self.create_timer(self.timeout_time_step, self.ran_out_of_time())
 
         # either create a timer to step at a fixed rate or only step when a response from the filter is received:
         if self.use_timer:
@@ -69,7 +76,7 @@ class TrialOptimizer(Node):
         Performs an optimizer step in which the groundtruth and noisy detected position are advanced
         with the latter one being published to be filtered.
         """
-        if self.use_debug  == 'True':
+        if self.use_debug:
             print('stepping optimizer')
         if len(self.robot_detection_msg_queue) > 0 and len(self.robot_groundtruth_msg_queue) > 0:
             # the elements in the que are tuple of time stamp + msg
@@ -77,9 +84,12 @@ class TrialOptimizer(Node):
             self.current_robot_groundtruth_msg = self.robot_groundtruth_msg_queue.pop()[1]
             self.current_robot_detection_msg = self.robot_detection_msg_queue.pop()[1]
             self.robot_position_detection_publisher.publish(self.current_robot_detection_msg)
+            if self.use_debug:
+                print('published message')
         else:
             self.logger.warn("Ran out of messages to publish. Stopping trial")
             self.stop_trial = True
+        self.current_optimizer_cycle += 1
 
     def robot_position_filtered_callback(self, robots_relative_filtered) -> None:
         """
@@ -87,7 +97,7 @@ class TrialOptimizer(Node):
 
         param robots_relative_filtered: Filtered robot data.
         """
-        if self.use_debug  == 'True':
+        if self.use_debug:
             print('handling filtered msg callback')
 
         self.current_robot_filtered_msg = robots_relative_filtered
@@ -112,17 +122,28 @@ class TrialOptimizer(Node):
             self.optimizer_step()
 
 
-    def get_filter_cycles(self) -> int:
+    def get_optimizer_cycles(self) -> int:
         """
         Returns number of filter cycles that have been passed through.
         """
-        return self.current_filter_cycle
+        return self.current_optimizer_cycle
 
     def get_average_error(self) -> float:
         """
         Returns average error based on the distance between ground truth and filtered robot positions for this trial.
+        If no filter cycles occured
         """
-        return self.error_sum / self.current_filter_cycle
+        if self.current_filter_cycle > 0:
+            return self.error_sum / self.current_filter_cycle
+        else:
+            return 999
+
+    def ran_out_of_time(self):
+        if self.timeout_incidents >= 1:
+            self.stop_trial = True
+            string = 'WARNING: Trial ran out of time'
+            print(f'\033[33m{string}\033[0m')
+        self.timeout_incidents += 1
 
     def get_stop_trial(self):
         """
@@ -162,10 +183,12 @@ def objective(trial) -> float:
     """
 
     # suggest parameter values
-    if use_debug == 'True':
+    if use_debug:
         debug_var = ''
     else:
         debug_var = '> /dev/null 2>&1'
+    # create param dictionary:
+    params = {}
     for input_parameter in data["parameters"]:
         temp = None
         if input_parameter["type"] == "int":
@@ -174,30 +197,53 @@ def objective(trial) -> float:
             temp = trial.suggest_float(input_parameter["name"], input_parameter["min"], input_parameter["max"])
         elif input_parameter["type"] == "categorical":
             temp = trial.suggest_categorical(input_parameter["name"], input_parameter["choices"])
-        if use_debug == 'True':
+        if use_debug:
             print("Suggestion for " + input_parameter["name"] + ": " + str(temp))
-        # set the param values:
-        os.system("ros2 param set /bitbots_ball_filter {} {} {}".format(input_parameter["name"], str(temp), debug_var))
+        params["{}".format(input_parameter["name"])] = "{}".format(str(temp))
+    # set the param values:
+    # os.system("ros2 param set /bitbots_ball_filter {} {} {}".format("adjusted_params", str(params), debug_var))
+    os.system("ros2 param set /bitbots_ball_filter adjusted_params " + str(params) + str(debug_var))
+
 
     # start filter optimizer
     rclpy.init()
-    if use_debug == 'True':
+    exception = False
+    if use_debug:
         print("Initializing trial optimizer...")
     trial_optimizer = TrialOptimizer()
     try:
-        while trial_optimizer.get_filter_cycles() < args.cycles and not trial_optimizer.get_stop_trial():
+        while not trial_optimizer.get_stop_trial()\
+                and trial_optimizer.get_optimizer_cycles() < args.cycles:
             rclpy.spin_once(trial_optimizer)
     except KeyboardInterrupt:
         trial_optimizer.destroy_node()
         rclpy.shutdown()
+        exception = True
+    except TypeError:
+        if trial_optimizer:
+            trial_optimizer.destroy_node()
+        rclpy.shutdown()
+        string = 'ERROR: Optimizer node got destroyed'
+        print(f'\033[31m{string}\033[0m')
+        exception = True
 
     # cleanup:
     average_error = trial_optimizer.get_average_error()
-    trial_optimizer.destroy_node()
-    rclpy.shutdown()
+
+    if not exception:
+        trial_optimizer.destroy_node()
+        rclpy.shutdown()
 
     # return evaluation value
     average_error_array.append(average_error)
+
+    # check if trial has reached invalid result
+    if average_error == 999: #todo change to ==
+        string = 'WARNING: Trial invalid'
+        print(f'\033[33m{string}\033[0m')
+        average_error = None
+        failed_trial_array.append(trial.params)
+
     return average_error
 
 def generate_msgs() -> None:
@@ -209,7 +255,7 @@ def generate_msgs() -> None:
     param max_error: The maximum error of the noise. Only necessary when use_noise is True.
     """
     # unpack rosbag:
-    if use_debug == 'True':
+    if use_debug:
         print("Unpacking bag")
     bag_parser = BagFileParser(bag_file)
     # extract groundtruth:
@@ -231,7 +277,7 @@ def generate_msgs() -> None:
             msg_tuple = [robot_position_true_queue[i][0],
                      gen_robot_array_msg(p_err[0], p_err[1], groundtruth_msg.header.stamp)]
             robot_msg_err_queue.append(msg_tuple)
-    if use_debug == 'True':
+    if use_debug:
         print("Message extraction finished")
 
 def gen_robot_array_msg(x, y, timestamp) -> RobotArray:
@@ -276,13 +322,13 @@ if __name__ == '__main__':
     parser.add_argument(
         '--trials',
         type=int,
-        default='2',
+        default='100',
         help="Number of Optuna trials")
     parser.add_argument(
         '--cycles',
         type=int,
         default='100',
-        help="Max amount of filter cycles per trial")
+        help="Max amount of optimizer cycles and therefore messages send to the filter per trial")
     parser.add_argument(
         '--noise',
         type=str,
@@ -295,15 +341,19 @@ if __name__ == '__main__':
 
     # configuration:
     use_noise = args.noise
-    use_debug = args.debug
+    if args.debug == 'True':
+        use_debug = True
+    else:
+        use_debug = False
     max_error = np.array([1,1])
     noise_array = []
+    failed_trial_array = []
     average_error_array = []
     robot_msg_err_queue = []
     robot_position_true_queue = []
     # bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
     bag_file = '/home/hendrik/Documents/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'    # todo bag name from config or somehting?
-    if use_debug == 'True':
+    if use_debug:
         print("Debug enabled")
 
     # pre-calculation:
@@ -313,7 +363,7 @@ if __name__ == '__main__':
     f1.close()
 
     # create study:
-    study = optuna.create_study()
+    study = optuna.create_study(direction="minimize")
 
     # start study with set number of trials:
     try:
@@ -352,18 +402,31 @@ if __name__ == '__main__':
                     "max": parameter_max,
                     "result": best_params[parameter_name]
                 })
-            if use_debug == 'True':
+            if use_debug:
                 print("Found {}. Best value is: {}".format(parameter_name, best_params[parameter_name]))
         num_previous_studies = len(output_data['study_outputs'])
         trial_output = {
             "study_number": num_previous_studies,
             "noise_array": noise_array,
+            "failed_trial_params": failed_trial_array,
             "average_error_array": average_error_array,
             "parameters": parameters
         }
         output_data['study_outputs'].append(trial_output)
         json.dump(output_data, f3, indent=4)
     f3.close()
+
+    plt.plot(average_error_array,
+             label='average error',
+             lw=1.5,
+             c="blue")
+    plt.xticks(range(0, len(average_error_array) + 1 , 1))
+
+    plt.xlabel('x - axis')
+    plt.ylabel('y - axis')
+    plt.title('My first graph!')
+    plt.legend()
+    plt.show()
 
 
 

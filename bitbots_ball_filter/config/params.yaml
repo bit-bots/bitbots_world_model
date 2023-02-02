@@ -75,3 +75,6 @@ bitbots_ball_filter:
     # todo this doesn't work yet
     max_filter_cycles: 100
     optuna_trials: 10
+
+    # string containing all parameters from Optuna
+    adjusted_params: ""
