@@ -6,6 +6,7 @@ import rclpy
 import math
 import json
 import argparse
+import subprocess
 import numpy as np
 from rclpy.node import Node
 from geometry_msgs.msg import PoseWithCovarianceStamped
@@ -17,7 +18,7 @@ import matplotlib.pyplot as plt
 
 
 class TrialOptimizer(Node):
-    def __init__(self) -> None:
+    def __init__(self, trial) -> None:
         super().__init__('trial_optimizer')
         self.logger = self.get_logger()
         self.current_filter_cycle = 0
@@ -27,18 +28,20 @@ class TrialOptimizer(Node):
         self.use_debug = use_debug
         self.timeout_time_step = 60
         self.timeout_incidents = 0
+        self.trial = trial
+        self.error_test_array = error_test_array
 
         self.robot_groundtruth_msg_queue = robot_position_true_queue.copy()
         self.robot_detection_msg_queue = robot_msg_err_queue.copy()
         self.current_robot_groundtruth_position = None
-        self.current_robot_groundtruth_msg = None
-        self.current_robot_detection_msg = None
+        self.current_robot_groundtruth_msg = self.robot_groundtruth_msg_queue.pop(0)[1]
+        self.current_robot_detection_msg = self.robot_detection_msg_queue.pop(0)[1]
         self.current_robot_filtered_position = None
         self.current_robot_filtered_msg = None
 
         self.optimizer_rate = 60 # todo get from config
         self.optimizer_time_step = 1.0 / self.optimizer_rate
-        self.use_timer = True
+        self.use_timer = False
 
         # setup subscriber for filtered robot positions:
         self.robot_position_filtered_subscriber = self.create_subscription(
@@ -55,15 +58,14 @@ class TrialOptimizer(Node):
             1
         )
 
-        # reset filter:
-        # todo get reset service name from config and reset filter before starting new trial
-        # robot_filter_reset_service_name = "ball_filter_reset"
-        # os.system("ros2 service call /{} std_srvs/Trigger".format(robot_filter_reset_service_name))
-
         if self.use_debug:
             print('...initialization finished')
-
         self.create_timer(self.timeout_time_step, self.ran_out_of_time())
+
+        # wait until robot filter has been created
+        while self.robot_position_detection_publisher.get_subscription_count() == 0:
+            self.logger.info("Waiting for robot filter...")
+            time.sleep(0.5)
 
         # either create a timer to step at a fixed rate or only step when a response from the filter is received:
         if self.use_timer:
@@ -76,13 +78,13 @@ class TrialOptimizer(Node):
         Performs an optimizer step in which the groundtruth and noisy detected position are advanced
         with the latter one being published to be filtered.
         """
-        if self.use_debug:
-            print('stepping optimizer')
+        #if self.use_debug:
+        if True:
+            print('stepping optimizer, opti cycle: {}, filter cycle: {}'.format(self.current_optimizer_cycle, self.current_filter_cycle))
         if len(self.robot_detection_msg_queue) > 0 and len(self.robot_groundtruth_msg_queue) > 0:
             # the elements in the que are tuple of time stamp + msg
-
-            self.current_robot_groundtruth_msg = self.robot_groundtruth_msg_queue.pop()[1]
-            self.current_robot_detection_msg = self.robot_detection_msg_queue.pop()[1]
+            self.current_robot_groundtruth_msg = self.robot_groundtruth_msg_queue.pop(0)[1]
+            self.current_robot_detection_msg = self.robot_detection_msg_queue.pop(0)[1]
             self.robot_position_detection_publisher.publish(self.current_robot_detection_msg)
             if self.use_debug:
                 print('published message')
@@ -120,7 +122,6 @@ class TrialOptimizer(Node):
         # step optimizer manually if it doesn't run on timer:
         if not self.use_timer:
             self.optimizer_step()
-
 
     def get_optimizer_cycles(self) -> int:
         """
@@ -182,6 +183,12 @@ def objective(trial) -> float:
     param trial: Optuna trial object.
     """
 
+    # initialize robot filter:
+    if use_debug:
+        pass
+    print("starting robot filter")
+    ball_filter_process = subprocess.Popen(["ros2","launch","bitbots_ball_filter","robot_filter.launch"])
+
     # suggest parameter values
     if use_debug:
         debug_var = ''
@@ -189,6 +196,7 @@ def objective(trial) -> float:
         debug_var = '> /dev/null 2>&1'
     # create param dictionary:
     params = {}
+    param_str = ""
     for input_parameter in data["parameters"]:
         temp = None
         if input_parameter["type"] == "int":
@@ -199,10 +207,14 @@ def objective(trial) -> float:
             temp = trial.suggest_categorical(input_parameter["name"], input_parameter["choices"])
         if use_debug:
             print("Suggestion for " + input_parameter["name"] + ": " + str(temp))
-        params["{}".format(input_parameter["name"])] = "{}".format(str(temp))
+        param_str += input_parameter["name"] + "#" + str(temp) + "#"
+        # params["{}".format(input_parameter["name"])] = "{}".format(str(temp))
     # set the param values:
     # os.system("ros2 param set /bitbots_ball_filter {} {} {}".format("adjusted_params", str(params), debug_var))
-    os.system("ros2 param set /bitbots_ball_filter adjusted_params " + str(params) + str(debug_var))
+    param_str += "trial_number" + "#" + str(trial.number) + "#"
+    #print("ros2 param set /bitbots_ball_filter adjusted_params " + str(param_str) + str(debug_var))
+
+    os.system("ros2 param set /bitbots_ball_filter adjusted_params " + str(param_str) + str(debug_var))
 
 
     # start filter optimizer
@@ -210,7 +222,7 @@ def objective(trial) -> float:
     exception = False
     if use_debug:
         print("Initializing trial optimizer...")
-    trial_optimizer = TrialOptimizer()
+    trial_optimizer = TrialOptimizer(trial)
     try:
         while not trial_optimizer.get_stop_trial()\
                 and trial_optimizer.get_optimizer_cycles() < args.cycles:
@@ -219,17 +231,21 @@ def objective(trial) -> float:
         trial_optimizer.destroy_node()
         rclpy.shutdown()
         exception = True
-    except TypeError:
-        if trial_optimizer:
-            trial_optimizer.destroy_node()
-        rclpy.shutdown()
-        string = 'ERROR: Optimizer node got destroyed'
-        print(f'\033[31m{string}\033[0m')
-        exception = True
+    # except TypeError:
+    #     if trial_optimizer:
+    #         trial_optimizer.destroy_node()
+    #     rclpy.shutdown()
+    #     string = 'ERROR: Optimizer node got destroyed'
+    #     print(f'\033[31m{string}\033[0m')
+    #     exception = True
 
     # cleanup:
+    # kill the robot filter:
+    # process = subprocess.Popen(["ros2","param", "set", "/bitbots_ball_filter", "selfdestruct", "True"])
+    os.system("ros2 param set /bitbots_ball_filter selfdestruct True")
+    time.sleep(1)
+    ball_filter_process.terminate()
     average_error = trial_optimizer.get_average_error()
-
     if not exception:
         trial_optimizer.destroy_node()
         rclpy.shutdown()
@@ -238,11 +254,12 @@ def objective(trial) -> float:
     average_error_array.append(average_error)
 
     # check if trial has reached invalid result
-    if average_error == 999: #todo change to ==
+    if average_error == 999:
         string = 'WARNING: Trial invalid'
         print(f'\033[33m{string}\033[0m')
         average_error = None
         failed_trial_array.append(trial.params)
+
 
     return average_error
 
@@ -351,6 +368,7 @@ if __name__ == '__main__':
     average_error_array = []
     robot_msg_err_queue = []
     robot_position_true_queue = []
+    error_test_array = []
     # bag_file = '/homes/18hbrandt/Dokumente/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'
     bag_file = '/home/hendrik/Documents/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3'    # todo bag name from config or somehting?
     if use_debug:
@@ -363,7 +381,7 @@ if __name__ == '__main__':
     f1.close()
 
     # create study:
-    study = optuna.create_study(direction="minimize")
+    study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler())
 
     # start study with set number of trials:
     try:
@@ -376,8 +394,6 @@ if __name__ == '__main__':
     with open('output_data.json', 'r') as f2:
         output_data = json.load(f2)
     f2.close()
-
-    print(noise_array)
 
     with open('output_data.json', 'w') as f3:
         parameters = []

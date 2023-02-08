@@ -49,27 +49,27 @@ bitbots_ball_filter:
     robot_filter_rate: 62  # we get an image every 16 ms -> 62.5 hz
 
     # Velocity reduction (per axis) factor of the robot per second
-    robot_velocity_reduction_x: 3.18 #0.6
-    robot_velocity_reduction_y: 7.54 #0.6
+    robot_velocity_reduction_x: 9.59 #0.6
+    robot_velocity_reduction_y: 5.36 #0.6
 
     # Noise which is added to the estimated position without new measurements
-    robot_process_noise_variance: 0.007 #0.001
+    robot_process_noise_variance: 0.70 #0.001
 
     # Robot measurement certainty in filter
-    robot_measurement_certainty: 0.65 #0.1
+    robot_measurement_certainty: 0.67 #0.1
 
     # Max robot not seen time in Seconds
-    robot_filter_reset_time: 16 #20
+    robot_filter_reset_time: 68 #20
 
     # Distance to the current estimation causing a filter reset
-    robot_filter_reset_distance: 8 #2
+    robot_filter_reset_distance: 7 #2
 
     # True if robot should be selected based on distance to filtered robot instead of highest rating
-    robot_closest_distance_match: False #True
+    robot_closest_distance_match: True #True
 
     # todo are these really x and y?
-    robot_transition_modifier_x: 5.0 #1.0
-    robot_transition_modifier_y: 5.0 #1.0
+    robot_transition_modifier_x: 0.12 #1.0
+    robot_transition_modifier_y: 2.35 #1.0
 
     # Optimizer parameters:
     # todo this doesn't work yet
@@ -78,3 +78,5 @@ bitbots_ball_filter:
 
     # string containing all parameters from Optuna
     adjusted_params: ""
+    trial_number: 0
+    selfdestruct: False

@@ -40,7 +40,7 @@ class Visualizer(Node):
         self.filtered_position_x_array = []
         self.filtered_position_y_array = []
         self.array_error = []
-        self.max_length = 400
+        self.max_length = 1000
         self.use_noise_data = True
         self.noise_array = []
         self.noise_array_counter = 0
@@ -97,23 +97,25 @@ class Visualizer(Node):
         average_error_array_x = []
         average_error_array_y = []
         for i in range(0, len(average_error_array) - 1):
-            average_error_array_x.append(i)
-            average_error_array_y.append(average_error_array[i])
-        for i in range(0, len(average_error_array) - 3):
-            if average_error_array[i] != 999 and average_error_array[i+1] != 999:
-                self.ax.plot(
-                    average_error_array_x[i:i + 2],
-                    average_error_array_y[i:i + 2],
-                    c="blue",
-                    lw=1.5
-                )
+            if average_error_array[i] != 999:
+                average_error_array_x.append(i)
+                average_error_array_y.append(average_error_array[i])
+        # for i in range(0, len(average_error_array) - 3):
+        #     if average_error_array[i] != 999 and average_error_array[i+1] != 999:
+        #         print("hey")
+        #         self.ax.plot(
+        #             average_error_array_x[i:i + 2],
+        #             average_error_array_y[i:i + 2],
+        #             c="blue",
+        #             lw=1.5
+        #         )
 
 
 
-        # plt.plot(average_error_array_x, average_error_array_y,
-        #          label='average error',
-        #          lw=1.5,
-        #          c="blue")
+        plt.plot(average_error_array_x, average_error_array_y,
+                 label='average error',
+                 lw=1.5,
+                 c="blue")
         #plt.xticks(range(0, len(average_error_array_y) + 1, 1))
 
         plt.xlabel('x - axis')
@@ -142,18 +144,12 @@ class Visualizer(Node):
 
             if len(self.groundtruth_position_x_array) >= self.max_length:
                 print('finished ground truth')
-                plt.plot(self.groundtruth_position_x_array, self.groundtruth_position_y_array,
-                         label='ground truth',
-                         lw=1.5,
-                         c="black")
+
                 self.unfinished_truth = False
 
                 if self.use_noise_data:
                     print('finished detected')
-                    plt.plot(self.detected_position_x_array, self.detected_position_y_array,
-                             label='detected',
-                             lw=1.5,
-                             c="blue")
+
                     self.unfinished_detected = False
 
     def robots_detection_callback(self, robots_relative_detected):
@@ -164,10 +160,7 @@ class Visualizer(Node):
             self.detected_position_y_array.append(position.y)
             if len(self.detected_position_x_array) >= self.max_length:
                 print('finished detected')
-                plt.plot(self.detected_position_x_array, self.detected_position_y_array,
-                         label='detected',
-                         lw=1.5,
-                         c="blue")
+
                 self.unfinished_detected = False
 
     def robots_relative_filtered_callback(self, robots_relative_filtered):
@@ -198,20 +191,36 @@ class Visualizer(Node):
 
     def plot(self):
         print('plotting...')
+
+        plt.plot(self.detected_position_x_array, self.detected_position_y_array,
+                 label='detected',
+                 lw=1.0,
+                 c="silver")
+
+
+
         viridis = mpl.colormaps['RdYlGn']  #.resampled(8)
-        for i in range(0, len(self.filtered_position_x_array) - 12):
+        print(self.filtered_position_x_array)
+        for i in range(0, len(self.filtered_position_x_array) - 4):
             error_sum = 0
-            for error in self.array_error[i:i+10]:
+            for error in self.array_error[i:i+2]:
                 error_sum += error
             #todo make this better by showing the legend of the scale
             # Todo create mean from surrounders and deal with edges
-            color = viridis(error_sum / 10)
+            color = viridis(error_sum / 2)
             self.ax.plot(
                 self.filtered_position_x_array[i:i + 2],
                 self.filtered_position_y_array[i:i + 2],
                 c=color,
                 lw=2
             )
+
+        plt.plot(self.groundtruth_position_x_array, self.groundtruth_position_y_array,
+                 label='ground truth',
+                 lw=1.5,
+                 c="black")
+
+        print('finished filtered')
 
         # plot error
         # plt.plot(self.array_position_filtered_x, self.array_position_filtered_y, label='filtered')
