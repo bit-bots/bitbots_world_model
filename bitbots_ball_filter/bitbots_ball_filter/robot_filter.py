@@ -40,10 +40,13 @@ class ObjectFilter(Node):
     def __init__(self) -> None:
         super().__init__("robot_filter", automatically_declare_parameters_from_overrides=True)
         self.logger = self.get_logger()
+        self.logger.info("starting filter")
         self.last_robot_stamp = None
         self.robot = None
         self.filter_initialized = False
         self.cycle = 0
+
+
 
         # Setup dynamic reconfigure config
         self.config = {}
@@ -56,7 +59,7 @@ class ObjectFilter(Node):
 
         param config: configuration with current parameter values
         """
-        #self.logger.info(f"Dynamic reconfigure callback")
+        self.logger.info(f"Dynamic reconfigure callback")
 
         # construct config from the params:
         tmp_config = deepcopy(self.config)
@@ -64,21 +67,25 @@ class ObjectFilter(Node):
             tmp_config[param.name] = param.value
         config = tmp_config
 
-        if config['adjusted_params'] != "":
-            adjusted_params = []
-            # print(str(config['adjusted_params']))
-            adjusted_params = config['adjusted_params'].split("#")
-            # print(adjusted_params)
-            i = 0
-            while i < len(adjusted_params) - 1:  # the list has one empty element in the back we don't need
-                temp = adjusted_params[i+1]
-                try:
-                    temp = float(adjusted_params[i+1])
-                except:
-                    pass
-                config[str(adjusted_params[i])] = temp
-                #print("{}: {}".format(adjusted_params[i], adjusted_params[i+1]))
-                i += 2
+        #if config['adjusted_params'] != "":
+        adjusted_params = []
+        # print(str(config['adjusted_params']))
+        #adjusted_params = config['adjusted_params'].split("#")
+
+        with open('text_params.txt', 'r') as file:
+            adjusted_params = file.read().split('#')
+        file.close()
+        # print(adjusted_params)
+        i = 0
+        while i < len(adjusted_params) - 1:  # the list has one empty element in the back we don't need
+            temp = adjusted_params[i+1]
+            try:
+                temp = float(adjusted_params[i+1])
+            except:
+                pass
+            config[str(adjusted_params[i])] = temp
+            print("{}: {}".format(adjusted_params[i], adjusted_params[i+1]))
+            i += 2
         #self.logger.warn(f"Parameter adjustment done")
 
         num_state_vars = 4  # 2 for position, 1 for direction and 1 for velocity
@@ -89,7 +96,7 @@ class ObjectFilter(Node):
 
         # additional setup:
         self.trial_number = config['trial_number']
-        #print("trial: " + str(self.trial_number))
+        self.logger.fatal("trial: " + str(self.trial_number))
         self.selfdestruct = config['selfdestruct']
         self.tf_buffer = tf2.Buffer(cache_time=rclpy.duration.Duration(seconds=2))
         self.tf_listener = tf2.TransformListener(self.tf_buffer, self)
@@ -157,6 +164,7 @@ class ObjectFilter(Node):
 
         :param msg: List of robot-detections
         """
+        self.logger.error("callback")
         if msg.robots:
             if self.closest_distance_match:
                 # select robot closest to previous prediction
@@ -167,8 +175,10 @@ class ObjectFilter(Node):
             position = self._get_transform(msg.header, robot_msg.bb.center.position)
             if position is not None:
                 self.robot = RobotWrapper(position, msg.header, robot_msg.confidence.confidence)
-                self.logger.warn("cycle: {}, x: {}, y: {}".format(self.cycle, self.robot.get_position().point.x, self.robot.get_position().point.y))
+                self.logger.warn("trial:{}, cycle: {}, x: {}, y: {}".format(self.trial_number, self.cycle, self.robot.get_position().point.x, self.robot.get_position().point.y))
                 self.cycle += 1
+            else:
+                self.logger.fatal("position is None OH NOOOOOO")
             self.filter_step()
 
     def _get_closest_robot_to_previous_prediction(self, robot_array: RobotArray) -> Union[Robot, None]:

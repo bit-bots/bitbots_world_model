@@ -1,0 +1,1 @@
+robot_velocity_reduction_x#2.2520378645732366#robot_velocity_reduction_y#8.801371437053266#robot_process_noise_variance#0.004167063279431671#robot_measurement_certainty#0.9248659599353962#robot_filter_reset_time#27#robot_filter_reset_distance#4#robot_closest_distance_match#True#robot_transition_modifier_x#5.0#robot_transition_modifier_y#5.0#trial_number#199#

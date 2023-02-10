@@ -97,7 +97,7 @@ class Visualizer(Node):
         average_error_array_x = []
         average_error_array_y = []
         for i in range(0, len(average_error_array) - 1):
-            if average_error_array[i] != 999:
+            if average_error_array[i] < 0.5:
                 average_error_array_x.append(i)
                 average_error_array_y.append(average_error_array[i])
         # for i in range(0, len(average_error_array) - 3):

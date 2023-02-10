@@ -4,6 +4,7 @@ import optuna
 import os
 import rclpy
 import math
+import random
 import json
 import argparse
 import subprocess
@@ -64,7 +65,7 @@ class TrialOptimizer(Node):
 
         # wait until robot filter has been created
         while self.robot_position_detection_publisher.get_subscription_count() == 0:
-            self.logger.info("Waiting for robot filter...")
+            self.logger.info("Waiting for subscriber...")
             time.sleep(0.5)
 
         # either create a timer to step at a fixed rate or only step when a response from the filter is received:
@@ -78,9 +79,12 @@ class TrialOptimizer(Node):
         Performs an optimizer step in which the groundtruth and noisy detected position are advanced
         with the latter one being published to be filtered.
         """
-        #if self.use_debug:
-        if True:
-            print('stepping optimizer, opti cycle: {}, filter cycle: {}'.format(self.current_optimizer_cycle, self.current_filter_cycle))
+        #todo remove
+        average_error = 0
+        if self.current_filter_cycle > 0:
+            average_error = self.error_sum/self.current_filter_cycle
+        if self.use_debug:
+            print('stepping optimizer, opti cycle: {}, filter cycle: {}, avg. error: {}'.format(self.current_optimizer_cycle, self.current_filter_cycle, average_error))
         if len(self.robot_detection_msg_queue) > 0 and len(self.robot_groundtruth_msg_queue) > 0:
             # the elements in the que are tuple of time stamp + msg
             self.current_robot_groundtruth_msg = self.robot_groundtruth_msg_queue.pop(0)[1]
@@ -121,6 +125,7 @@ class TrialOptimizer(Node):
 
         # step optimizer manually if it doesn't run on timer:
         if not self.use_timer:
+            print(self.current_robot_filtered_position)
             self.optimizer_step()
 
     def get_optimizer_cycles(self) -> int:
@@ -214,7 +219,49 @@ def objective(trial) -> float:
     param_str += "trial_number" + "#" + str(trial.number) + "#"
     #print("ros2 param set /bitbots_ball_filter adjusted_params " + str(param_str) + str(debug_var))
 
-    os.system("ros2 param set /bitbots_ball_filter adjusted_params " + str(param_str) + str(debug_var))
+    #os.system("ros2 param set /bitbots_ball_filter adjusted_params " + str(param_str) + str(debug_var))
+    # start parameter configuration
+    # if use_debug:
+    #     print("start parameter configuration")
+    # while True:
+    #     try:  # try configuring parameters until node is found and set parameter is succesful
+    #         temp = str(subprocess.check_output(["ros2",
+    #                                "param",
+    #                                "set",
+    #                                "/bitbots_ball_filter",
+    #                                "adjusted_params",
+    #                                str(param_str)]))[0:-3]  # cut of /n'
+    #         if temp == "b'Set parameter successful":
+    #             break
+    #     except:
+    #         print("Waiting for robot filter to start up...")
+    #         time.sleep(0.5)
+    # if use_debug:
+    #     print("parameter configuration done")
+    #os.system("ros2 param set /bitbots_ball_filter adjusted_params " + str(param_str) + str(debug_var))
+    # time.sleep(1)
+    # print("bfore")
+    # found_filter_flag = False
+    # while not found_filter_flag:
+    #     print("test")
+    #     nodes = str(subprocess.check_output(["ros2", "node", "list"]), 'utf-8')
+    #     for node in nodes.split("\n"):
+    #         if node == "/bitbots_ball_filter":
+    #             subprocess.call(["ros2",
+    #                             "param",
+    #                             "set",
+    #                             "/bitbots_ball_filter",
+    #                             "adjusted_params",
+    #                             str(param_str)])
+    #             found_filter_flag = True
+    #             break
+    # print("after")
+    #print("temp: " + str(temp))
+    #time.sleep(10)
+
+    with open('text_params.txt', 'w') as file:
+        file.write(param_str)
+    file.close()
 
 
     # start filter optimizer
@@ -231,13 +278,13 @@ def objective(trial) -> float:
         trial_optimizer.destroy_node()
         rclpy.shutdown()
         exception = True
-    # except TypeError:
-    #     if trial_optimizer:
-    #         trial_optimizer.destroy_node()
-    #     rclpy.shutdown()
-    #     string = 'ERROR: Optimizer node got destroyed'
-    #     print(f'\033[31m{string}\033[0m')
-    #     exception = True
+    except TypeError:
+        if trial_optimizer:
+            trial_optimizer.destroy_node()
+        rclpy.shutdown()
+        string = 'ERROR: Optimizer node got destroyed'
+        print(f'\033[31m{string}\033[0m')
+        exception = True
 
     # cleanup:
     # kill the robot filter:
@@ -245,20 +292,24 @@ def objective(trial) -> float:
     os.system("ros2 param set /bitbots_ball_filter selfdestruct True")
     time.sleep(1)
     ball_filter_process.terminate()
-    average_error = trial_optimizer.get_average_error()
-    if not exception:
-        trial_optimizer.destroy_node()
-        rclpy.shutdown()
 
-    # return evaluation value
+    if not exception:
+        average_error = trial_optimizer.get_average_error()
+    else:
+        average_error = 999
     average_error_array.append(average_error)
 
+    # return evaluation value
+
     # check if trial has reached invalid result
-    if average_error == 999:
+    if average_error == 999 or exception:
         string = 'WARNING: Trial invalid'
         print(f'\033[33m{string}\033[0m')
         average_error = None
         failed_trial_array.append(trial.params)
+    else:
+        trial_optimizer.destroy_node()
+        rclpy.shutdown()
 
 
     return average_error
@@ -388,6 +439,7 @@ if __name__ == '__main__':
         study.optimize(objective, n_trials=args.trials)
     except KeyboardInterrupt:
         print("Keyboard interrupt. Aborting optimization study")
+
 
     # Save best parameter values to output file:
     best_params = study.best_params

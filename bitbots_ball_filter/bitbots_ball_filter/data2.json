@@ -3,55 +3,55 @@
         {
         "name": "robot_velocity_reduction_x",
         "type": "float",
-        "min": 0,
-        "max": 10
+        "min": 9.936935610683351,
+        "max": 9.936935610683351
         },
         {
         "name": "robot_velocity_reduction_y",
         "type": "float",
-        "min": 0,
-        "max": 10
+        "min": 3.223676620846319,
+        "max": 3.223676620846319
         },
         {
         "name": "robot_process_noise_variance",
         "type": "float",
-        "min": 0,
-        "max": 0.1
+        "min": 0.05498678236964191,
+        "max": 0.05498678236964191
         },
         {
         "name": "robot_measurement_certainty",
         "type": "float",
-        "min": 0,
-        "max": 1
+        "min": 0.7307305072866581,
+        "max": 0.7307305072866581
         },
         {
         "name": "robot_filter_reset_time",
         "type": "int",
-        "min": 1,
-        "max": 40
+        "min": 29,
+        "max": 29
         },
         {
         "name": "robot_filter_reset_distance",
         "type": "int",
         "min": 1,
-        "max": 10
+        "max": 1
         },
         {
         "name": "robot_closest_distance_match",
         "type": "categorical",
-        "choices": ["True", "False"]
+        "choices": ["True"]
         },
         {
         "name": "robot_transition_modifier_x",
         "type": "float",
-        "min": 5,
-        "max": 5
+        "min": 5.0,
+        "max": 5.0
         },
         {
         "name": "robot_transition_modifier_y",
         "type": "float",
-        "min": 5,
-        "max": 5
+        "min": 5.0,
+        "max": 5.0
         }
     ]
 }
