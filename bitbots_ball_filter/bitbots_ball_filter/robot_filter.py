@@ -6,6 +6,7 @@ import numpy as np
 import rclpy
 import tf2_ros as tf2
 import json
+import warnings
 
 from copy import deepcopy
 from filterpy.common import Q_discrete_white_noise
@@ -46,6 +47,8 @@ class ObjectFilter(Node):
         self.filter_initialized = False
         self.cycle = 0
 
+        warnings.filterwarnings('ignore')  # ignore complex warnings
+
 
 
         # Setup dynamic reconfigure config
@@ -84,7 +87,7 @@ class ObjectFilter(Node):
             except:
                 pass
             config[str(adjusted_params[i])] = temp
-            print("{}: {}".format(adjusted_params[i], adjusted_params[i+1]))
+            #print("{}: {}".format(adjusted_params[i], adjusted_params[i+1]))
             i += 2
         #self.logger.warn(f"Parameter adjustment done")
 
@@ -164,7 +167,7 @@ class ObjectFilter(Node):
 
         :param msg: List of robot-detections
         """
-        self.logger.error("callback")
+        #self.logger.error("callback")
         if msg.robots:
             if self.closest_distance_match:
                 # select robot closest to previous prediction
@@ -175,7 +178,7 @@ class ObjectFilter(Node):
             position = self._get_transform(msg.header, robot_msg.bb.center.position)
             if position is not None:
                 self.robot = RobotWrapper(position, msg.header, robot_msg.confidence.confidence)
-                self.logger.warn("trial:{}, cycle: {}, x: {}, y: {}".format(self.trial_number, self.cycle, self.robot.get_position().point.x, self.robot.get_position().point.y))
+                #self.logger.warn("trial:{}, cycle: {}, x: {}, y: {}".format(self.trial_number, self.cycle, self.robot.get_position().point.x, self.robot.get_position().point.y))
                 self.cycle += 1
             else:
                 self.logger.fatal("position is None OH NOOOOOO")
@@ -193,6 +196,29 @@ class ObjectFilter(Node):
                 if distance < closest_distance:
                     closest_robot_msg = robot_msg
         return closest_robot_msg
+
+    # [I 2023 - 02 - 10 12: 21:38, 157] Trial
+    # 37
+    # finished
+    # with value: 0.6956037406972585
+    #     'robot_velocity_reduction_x': 9.95938559730452,
+    #     'robot_velocity_reduction_y': 0.08664108338657796,
+    #     'robot_process_noise_variance': 0.049930827957340065,
+    #     'robot_measurement_certainty': 0.22226391009500354,
+    #     'robot_filter_reset_time': 27, 'robot_filter_reset_distance': 1,
+    #     'robot_closest_distance_match': 'True', 'robot_transition_modifier_x': 5.0,
+    #     'robot_transition_modifier_y': 5.0}.
+    #
+    #     finished
+    #     with value: 0.6953856754826296
+    #     {'robot_velocity_reduction_x': 4.2711586741716365,
+    #     'robot_velocity_reduction_y': 0.06154432803815002,
+    #     'robot_process_noise_variance': 0.08785638419793501,
+    #     'robot_measurement_certainty': 0.7218024285964398,
+    #     'robot_filter_reset_time': 37, 'robot_filter_reset_distance': 1,
+    #     'robot_closest_distance_match': 'False',
+    #     'robot_transition_modifier_x': 5.0,
+    #     'robot_transition_modifier_y': 5.0}.
 
     def _get_transform(self,
                        header: Header,
