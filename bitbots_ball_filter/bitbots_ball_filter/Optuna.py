@@ -98,6 +98,7 @@ class TrialOptimizer(Node):
         else:
             self.logger.warn('Ran out of messages to publish. Stopping trial')
             self.stop_trial = True
+            raise KeyboardInterrupt
         self.current_optimizer_cycle += 1
 
     def robot_position_filtered_callback(self, robots_relative_filtered) -> None:
