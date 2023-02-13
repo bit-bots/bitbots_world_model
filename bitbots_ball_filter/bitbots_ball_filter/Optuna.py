@@ -410,8 +410,8 @@ if __name__ == '__main__':
     parser.add_argument(
         '--bag',
         type=str,
-        default='/home/hendrik/Documents/rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3',
-        help='Absolute path to the rosbag containing the messages')
+        default='rosbag2_2022_12_13-12_34_57_0/rosbag2_2022_12_13-12_34_57_0.db3',
+        help='Path to the rosbag containing the messages')
     parser.add_argument(
         '--plot',
         type=str,
