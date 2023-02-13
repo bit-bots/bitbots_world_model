@@ -41,7 +41,7 @@ class Visualizer(Node):
         self.filtered_position_y_array = []
         self.array_error = []
         self.max_length = 1000
-        self.use_noise_data = True
+        self.use_noise_data = False
         self.noise_array = []
         self.noise_array_counter = 0
         self.trial_number = -1
@@ -84,6 +84,28 @@ class Visualizer(Node):
         )
 
 
+
+
+        # array_x = []
+        # array_y = []
+        # for i in range(0, 999):
+        #     array_y.append(average_error_array_y[-1])
+        #     array_x.append(i)
+        # plt.plot(array_x, array_y,
+        #          label='average error {}'.format(0),
+        #          lw=1.5,
+        #          c='black')
+
+        #self.plot_average_error()
+
+
+
+        # todo remove for normal behaviour
+        # self.unfinished_filtered = False
+        # self.unfinished_truth = False
+        # self.unfinished_detected = False
+
+    def plot_average_error(self):
         temp = 0
         for study_num in self.trial_array:
 
@@ -119,7 +141,6 @@ class Visualizer(Node):
             #             lw=1.5
             #         )
 
-
             if temp == 0:
                 color = 'red'
                 label = 'wide parameter space'
@@ -133,22 +154,10 @@ class Visualizer(Node):
                      label=label,
                      lw=1.0,
                      c=color)
-            #plt.xticks(range(0, len(average_error_array_y) + 1, 1))
+            # plt.xticks(range(0, len(average_error_array_y) + 1, 1))
             temp += 1
             print("min for {}: {}".format(study_num, min(average_error_array_y)))
             print("convergence for {}: {}".format(study_num, self.estimate_q(average_error_array_y)))
-
-        # array_x = []
-        # array_y = []
-        # for i in range(0, 999):
-        #     array_y.append(average_error_array_y[-1])
-        #     array_x.append(i)
-        # plt.plot(array_x, array_y,
-        #          label='average error {}'.format(0),
-        #          lw=1.5,
-        #          c='black')
-
-
 
         plt.yscale('log')
         #plt.xscale('log')
@@ -158,14 +167,6 @@ class Visualizer(Node):
         plt.legend()
         plt.savefig('100gbu05.pdf')
         plt.show()
-
-
-
-        # todo remove for normal behaviour
-        self.unfinished_filtered = False
-        self.unfinished_truth = False
-        self.unfinished_detected = False
-
 
     def estimate_q(self, eps):
         """
@@ -245,22 +246,24 @@ class Visualizer(Node):
                  c="silver")
 
 
-
-        viridis = mpl.colormaps['RdYlGn']  #.resampled(8)
-        print(self.filtered_position_x_array)
+        norm = mpl.colors.Normalize(vmin=0, vmax=0.5)
+        color_map = mpl.colormaps['RdYlGn_r']  #.resampled(8)
+        total_error_sum = 0
         for i in range(0, len(self.filtered_position_x_array) - 4):
             error_sum = 0
+            total_error_sum += self.array_error[i]
+            print(total_error_sum)
             for error in self.array_error[i:i+2]:
                 error_sum += error
-            #todo make this better by showing the legend of the scale
-            # Todo create mean from surrounders and deal with edges
-            color = viridis(error_sum / 2)
-            self.ax.plot(
-                self.filtered_position_x_array[i:i + 2],
-                self.filtered_position_y_array[i:i + 2],
-                c=color,
-                lw=2
-            )
+            color = color_map(norm(error_sum / 2))
+            # self.ax.plot(
+            #     self.filtered_position_x_array[i:i + 2],
+            #     self.filtered_position_y_array[i:i + 2],
+            #     c=color,
+            #     lw=3
+            # )
+        print(len(self.filtered_position_x_array))
+        print("average error: {}".format(total_error_sum / (len(self.filtered_position_x_array) - 4)))
 
         plt.plot(self.groundtruth_position_x_array, self.groundtruth_position_y_array,
                  label='ground truth',
@@ -274,8 +277,9 @@ class Visualizer(Node):
 
         plt.xlabel('x - axis')
         plt.ylabel('y - axis')
-        plt.title('My first graph!')
+        plt.title('Robot Position')
         plt.legend()
+        plt.savefig('example.pdf')
         plt.show()
 
     def is_truth_unfinished(self):

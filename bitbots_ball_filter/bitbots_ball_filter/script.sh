@@ -46,8 +46,8 @@ echo 31
 read test
 # 1000 cycles
 # tpe
-python3 Optuna.py --debug=False --trials=200 --cycles=1000 --prune=True --sampler=TPESampler --noise_size=0.5
-python3 Optuna.py --debug=False --trials=200 --cycles=1000 --prune=True --sampler=TPESampler --noise_size=1.0
+#python3 Optuna.py --debug=False --trials=200 --cycles=1000 --prune=True --sampler=TPESampler --noise_size=0.5
+#python3 Optuna.py --debug=False --trials=200 --cycles=1000 --prune=True --sampler=TPESampler --noise_size=1.0
 python3 Optuna.py --debug=False --trials=200 --cycles=1000 --prune=True --sampler=TPESampler --noise_size=2.0
 # random
 python3 Optuna.py --debug=False --trials=200 --cycles=1000 --prune=True --sampler=RandomSampler --noise_size=0.5
