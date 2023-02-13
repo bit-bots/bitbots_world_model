@@ -3,12 +3,14 @@ import time
 import optuna
 import os
 import rclpy
+import signal
 import math
 import random
 import json
 import argparse
 import subprocess
 import numpy as np
+import timeit
 from rclpy.node import Node
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from soccer_vision_3d_msgs.msg import RobotArray, Robot
@@ -200,6 +202,11 @@ def objective(trial):
 
     param trial: Optuna trial object.
     """
+    # signal.signal(signal.SIGALRM, signal_handler)
+    # signal.alarm(100)  # raises TimeoutException after specified number of seconds
+    trial_optimizer = None
+    filter_process = None
+    # try:
     # suggest parameter values
     params = {}
     param_str = ''
@@ -231,6 +238,7 @@ def objective(trial):
     # start filter optimizer
     rclpy.init()
     exception = False
+    pruned = False
     if use_debug:
         print('Initializing trial optimizer...')
     trial_optimizer = TrialOptimizer(trial)
@@ -238,20 +246,30 @@ def objective(trial):
         while not trial_optimizer.get_stop_trial()\
                 and trial_optimizer.get_optimizer_cycles() < args.cycles:
             rclpy.spin_once(trial_optimizer)
+            trial.report(trial_optimizer.get_average_error(), trial_optimizer.get_optimizer_cycles())
+            if trial.should_prune():
+                pruned = True
+                string = 'pruning trial after {} cycles'.format(trial_optimizer.get_optimizer_cycles())
+                print(f'\033[33m{string}\033[0m')
+                break
     except KeyboardInterrupt:
         exception = True
     except TypeError:
         string = 'ERROR: Optimizer node ran into problem'
         print(f'\033[31m{string}\033[0m')
         exception = True
-    rclpy.shutdown()
+    # except TimeoutException:
+    #     string = 'ERROR: Optimizer timed out'
+    #     print(f'\033[31m{string}\033[0m')
+    #     exception = True
 
     # cleanup:
-
+    rclpy.shutdown()
     # kill the robot filter:
-    os.system('ros2 param set /bitbots_ball_filter selfdestruct True')
+    #os.system('ros2 param set /bitbots_ball_filter selfdestruct True')
     filter_alive_flag = True
     while filter_alive_flag:  # make sure to only terminate the subprocess once the filter has been killed
+        os.system('ros2 param set /bitbots_ball_filter selfdestruct True')
         nodes = str(subprocess.check_output(['ros2', 'node', 'list']), 'utf-8')
         # go through nodes and repeat if filter is still alive:
         for node in nodes.split('\n'):
@@ -271,17 +289,24 @@ def objective(trial):
         trial_optimizer.destroy_node()
     else:
         average_error = -1
-    if exception or average_error == -1:
+    if exception or average_error == -1:  # exception case
         string = 'WARNING: Trial invalid'
         print(f'\033[33m{string}\033[0m')
         average_error_array.append(-1)
         failed_trial_array.append(trial.params)
         return None
-    else:
+    elif pruned:  # pruning case
+        average_error_array.append(-2)
+        raise optuna.TrialPruned()
+    else:  # normal case
         average_error_array.append(average_error)
         return average_error
 
 
+def signal_handler(signum, frame):
+    raise TimeoutException('Timed out!')
+
+class TimeoutException(Exception): pass
 
 def generate_msgs() -> None:
     '''
@@ -390,9 +415,34 @@ if __name__ == '__main__':
     parser.add_argument(
         '--plot',
         type=str,
-        default='True',
+        default='False',
         choices=['true', 'True', 'false', 'False'],
         help='Decides whether average error of the study should be plotted at the end')
+    parser.add_argument(
+        '--prune',
+        type=str,
+        default='False',
+        choices=['true', 'True', 'false', 'False'],
+        help='Decides whether a pruner should be used for the study'
+    )
+    parser.add_argument(
+        '--noise_size',
+        type=float,
+        default=1.0,
+        help='Determines the level of noise for each dimension'
+    )
+    parser.add_argument(#todo choices and implementation
+        '--sampler',
+        type=str,
+        default='TPESampler',
+        help='Decides the sampler for the study'
+    )
+    parser.add_argument(#todo choices and implementation
+        '--pruner',
+        type=str,
+        default='MedianPruner',
+        help='Decides the pruner for the study'
+    )
     args = parser.parse_args()
 
     # configuration:
@@ -408,7 +458,22 @@ if __name__ == '__main__':
         do_plot = True
     else:
         do_plot = False
-    max_error = np.array([1,1])
+    if args.sampler == 'RandomSampler':
+        sampler = optuna.samplers.RandomSampler()
+    else:
+        sampler = optuna.samplers.TPESampler()
+    if args.prune == 'True' or args.prune == 'true':
+        #pruner = optuna.pruners.ThresholdPruner(upper=10)
+        #pruner = optuna.pruners.HyperbandPruner(min_resource=args.cycles * 0.25, max_resource=args.cycles)
+        pruner = optuna.pruners.MedianPruner(
+            n_startup_trials=int(round(args.trials * 0.1)),
+            n_warmup_steps=int(round(args.cycles * 0.25)),
+            #interval_steps=int(round(args.cycles * 0.1)),
+            n_min_trials=int(round(args.trials * 0.1))
+            )
+    else:
+        pruner = optuna.pruners.NopPruner()  # pruner that never prunes
+    max_error = np.array([args.noise_size,args.noise_size])
     noise_array = []
     error_measure = args.error
     failed_trial_array = []
@@ -422,26 +487,39 @@ if __name__ == '__main__':
 
     # pre-calculation:
     generate_msgs()
-    with open('data.json') as file:
+    with open('dataMid.json') as file:
         data = json.load(file)
     file.close()
 
     # create study:
-    study = optuna.create_study(direction='minimize', sampler=optuna.samplers.TPESampler())
+    study = optuna.create_study(direction='minimize',
+                                sampler=optuna.samplers.TPESampler(),
+                                pruner=pruner
+                                )
 
     # start study with set number of trials:
-    try:
-        study.optimize(objective, n_trials=args.trials)
-    except KeyboardInterrupt:
-        print('Keyboard interrupt. Aborting optimization study')
-
+    retry = True
+    while retry:
+        retry = False
+        start = time.time()
+        signal.signal(signal.SIGALRM, signal_handler)
+        signal.alarm(1800)  # raises TimeoutException after specified number of seconds
+        try:
+            study.optimize(objective, n_trials=args.trials)
+        except KeyboardInterrupt:
+            print('Keyboard interrupt. Aborting optimization study')
+        except TimeoutException:
+            string = 'ERROR: Study timed out, Retrying...'
+            print(f'\033[31m{string}\033[0m')
+            retry = True
+        end = time.time()
 
     # save best parameter values to output file:
     best_params = study.best_params
-    with open('output_data.json', 'r') as file:
+    with open('output_data2.json', 'r') as file:
         output_data = json.load(file)
     file.close()
-    with open('output_data.json', 'w') as file:
+    with open('output_data2.json', 'w') as file:
         parameters = []
         for parameter in data['parameters']:
             parameter_name = parameter['name']
@@ -469,6 +547,13 @@ if __name__ == '__main__':
         num_previous_studies = len(output_data['study_outputs'])
         trial_output = {
             'study_number': num_previous_studies,
+            'time': end - start,
+            'noise_size': args.noise_size,
+            'trials': args.trials,
+            'cycles': args.cycles,
+            'sampler':args.sampler,
+            'pruner':args.pruner,
+            'error':args.error,
             'noise_array': noise_array,
             'failed_trial_params': failed_trial_array,
             'average_error_array': average_error_array,
@@ -484,9 +569,12 @@ if __name__ == '__main__':
         average_error_array_x = []
         average_error_array_y = []
         for i in range(0, len(average_error_array) - 1):
-            if average_error_array[i] != -1:
+            if average_error_array[i] >= 0:
                 average_error_array_x.append(i)
                 average_error_array_y.append(average_error_array[i])
+            elif average_error_array[i] == -2:
+                string = 'INFO: Trial {} was pruned and will not be shown'.format(i)
+                print(string)
             else:
                 string = 'WARNING: Trial {} failed and will not be shown'.format(i)
                 print(f'\033[33m{string}\033[0m')

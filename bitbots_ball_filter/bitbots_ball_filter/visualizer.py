@@ -45,6 +45,11 @@ class Visualizer(Node):
         self.noise_array = []
         self.noise_array_counter = 0
         self.trial_number = -1
+        # mwn comparison
+        #self.trial_array = [36, 35, 37] # 1000 2
+        #self.trial_array = [39, 38, 40] # 100 2
+        #self.trial_array = [42, 41, 43] # 1000 0.5
+        self.trial_array = [45, 44, 46] # 100 0.5
         self.unfinished_truth = True
         self.unfinished_filtered = True
         self.unfinished_detected = True
@@ -78,57 +83,99 @@ class Visualizer(Node):
             1
         )
 
-        with open('output_data.json', 'r') as f1:
-            self.output_data = json.load(f1)
-        f1.close()
-        if self.trial_number == -1 or self.trial_number > len(self.output_data['study_outputs']) - 1:
-            trial = self.output_data['study_outputs'][
-                len(self.output_data['study_outputs']) - 1]
-        else:
-            trial = self.output_data['study_outputs'][self.trial_number]
-        self.noise_array = trial['noise_array']
-        if len(self.noise_array) == 0:
-            self.use_noise_data = False
-            print('ERROR: no noise data available, output will use normal detected messages')
-        print("...initialization done")
 
-        # plot average error:
-        average_error_array = trial['average_error_array']
-        average_error_array_x = []
-        average_error_array_y = []
-        for i in range(0, len(average_error_array) - 1):
-            if average_error_array[i] < 0.4:
-                average_error_array_x.append(i)
-                average_error_array_y.append(average_error_array[i])
-        # for i in range(0, len(average_error_array) - 3):
-        #     if average_error_array[i] != 999 and average_error_array[i+1] != 999:
-        #         print("hey")
-        #         self.ax.plot(
-        #             average_error_array_x[i:i + 2],
-        #             average_error_array_y[i:i + 2],
-        #             c="blue",
-        #             lw=1.5
-        #         )
+        temp = 0
+        for study_num in self.trial_array:
+
+            with open('output_data.json', 'r') as f1:
+                self.output_data = json.load(f1)
+            f1.close()
+            if self.trial_number == -1 or self.trial_number > len(self.output_data['study_outputs']) - 1:
+                trial = self.output_data['study_outputs'][study_num]
+            else:
+                trial = self.output_data['study_outputs'][self.trial_number]
+            self.noise_array = trial['noise_array']
+            if len(self.noise_array) == 0:
+                self.use_noise_data = False
+                print('ERROR: no noise data available, output will use normal detected messages')
+            print("...initialization done")
+
+            # plot average error:
+            print(trial['study_number'])
+            average_error_array = trial['average_error_array']
+            average_error_array_x = []
+            average_error_array_y = []
+            for i in range(0, len(average_error_array) - 1):
+                if average_error_array[i] > 0:
+                    average_error_array_x.append(i)
+                    average_error_array_y.append(average_error_array[i])
+            # for i in range(0, len(average_error_array) - 3):
+            #     if average_error_array[i] != 999 and average_error_array[i+1] != 999:
+            #         print("hey")
+            #         self.ax.plot(
+            #             average_error_array_x[i:i + 2],
+            #             average_error_array_y[i:i + 2],
+            #             c="blue",
+            #             lw=1.5
+            #         )
+
+
+            if temp == 0:
+                color = 'red'
+                label = 'wide parameter space'
+            elif temp == 1:
+                color = 'blue'
+                label = 'medium parameter space'
+            else:
+                color = 'green'
+                label = 'narrow parameter space'
+            plt.plot(average_error_array_x, average_error_array_y,
+                     label=label,
+                     lw=1.0,
+                     c=color)
+            #plt.xticks(range(0, len(average_error_array_y) + 1, 1))
+            temp += 1
+            print("min for {}: {}".format(study_num, min(average_error_array_y)))
+            print("convergence for {}: {}".format(study_num, self.estimate_q(average_error_array_y)))
+
+        # array_x = []
+        # array_y = []
+        # for i in range(0, 999):
+        #     array_y.append(average_error_array_y[-1])
+        #     array_x.append(i)
+        # plt.plot(array_x, array_y,
+        #          label='average error {}'.format(0),
+        #          lw=1.5,
+        #          c='black')
 
 
 
-        plt.plot(average_error_array_x, average_error_array_y,
-                 label='average error',
-                 lw=1.5,
-                 c="blue")
-        #plt.xticks(range(0, len(average_error_array_y) + 1, 1))
-
-        plt.xlabel('x - axis')
-        plt.ylabel('y - axis')
-        plt.title('My first graph!')
+        plt.yscale('log')
+        #plt.xscale('log')
+        plt.xlabel('Trial')
+        plt.ylabel('Average Error')
+        plt.title('')
         plt.legend()
+        plt.savefig('100gbu05.pdf')
         plt.show()
+
+
 
         # todo remove for normal behaviour
         self.unfinished_filtered = False
         self.unfinished_truth = False
         self.unfinished_detected = False
 
+
+    def estimate_q(self, eps):
+        """
+        estimate rate of convergence q from sequence esp
+        """
+        x = np.arange(len(eps) - 1)
+        y = np.log(np.abs(np.diff(np.log(eps))))
+        line = np.polyfit(x, y, 1)  # fit degree 1 polynomial
+        q = np.exp(line[0])  # find q
+        return q
 
 
 

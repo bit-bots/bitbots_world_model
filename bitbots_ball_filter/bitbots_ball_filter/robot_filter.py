@@ -49,8 +49,6 @@ class ObjectFilter(Node):
 
         warnings.filterwarnings('ignore')  # ignore complex warnings
 
-
-
         # Setup dynamic reconfigure config
         self.config = {}
         self.add_on_set_parameters_callback(self._dynamic_reconfigure_callback)
@@ -70,15 +68,9 @@ class ObjectFilter(Node):
             tmp_config[param.name] = param.value
         config = tmp_config
 
-        #if config['adjusted_params'] != "":
-        adjusted_params = []
-        # print(str(config['adjusted_params']))
-        #adjusted_params = config['adjusted_params'].split("#")
-
         with open('text_params.txt', 'r') as file:
             adjusted_params = file.read().split('#')
         file.close()
-        # print(adjusted_params)
         i = 0
         while i < len(adjusted_params) - 1:  # the list has one empty element in the back we don't need
             temp = adjusted_params[i+1]
@@ -87,19 +79,16 @@ class ObjectFilter(Node):
             except:
                 pass
             config[str(adjusted_params[i])] = temp
-            #print("{}: {}".format(adjusted_params[i], adjusted_params[i+1]))
             i += 2
-        #self.logger.warn(f"Parameter adjustment done")
 
         num_state_vars = 4  # 2 for position, 1 for direction and 1 for velocity
-        num_measurement_inputs = 2 # todo?
+        num_measurement_inputs = 2
 
         # create Kalman filter:
         self.kf = KalmanFilter(dim_x=num_state_vars, dim_z=num_measurement_inputs, dim_u=0)
 
         # additional setup:
         self.trial_number = config['trial_number']
-        self.logger.fatal("trial: " + str(self.trial_number))
         self.selfdestruct = config['selfdestruct']
         self.tf_buffer = tf2.Buffer(cache_time=rclpy.duration.Duration(seconds=2))
         self.tf_listener = tf2.TransformListener(self.tf_buffer, self)
@@ -120,7 +109,6 @@ class ObjectFilter(Node):
             self.filter_frame = config['odom_frame']
         elif filter_frame == "map":
             self.filter_frame = config['map_frame']
-        #self.logger.info(f"Using frame '{self.filter_frame}' for robot filtering")
 
         # adapt velocity factor to frequency
         self.velocity_factor_x = (1 - config['robot_velocity_reduction_x']) ** (1 / self.filter_rate)
@@ -156,7 +144,7 @@ class ObjectFilter(Node):
         )
 
         self.config = config
-        # essentially this is the thing that calls the filter step #todo why commented out?
+
         #self.filter_timer = self.create_timer(self.filter_time_step, self.filter_step)
 
         return SetParametersResult(successful=True)
@@ -167,7 +155,6 @@ class ObjectFilter(Node):
 
         :param msg: List of robot-detections
         """
-        #self.logger.error("callback")
         if msg.robots:
             if self.closest_distance_match:
                 # select robot closest to previous prediction
@@ -178,7 +165,6 @@ class ObjectFilter(Node):
             position = self._get_transform(msg.header, robot_msg.bb.center.position)
             if position is not None:
                 self.robot = RobotWrapper(position, msg.header, robot_msg.confidence.confidence)
-                #self.logger.warn("trial:{}, cycle: {}, x: {}, y: {}".format(self.trial_number, self.cycle, self.robot.get_position().point.x, self.robot.get_position().point.y))
                 self.cycle += 1
             else:
                 self.logger.fatal("position is None OH NOOOOOO")
@@ -196,29 +182,6 @@ class ObjectFilter(Node):
                 if distance < closest_distance:
                     closest_robot_msg = robot_msg
         return closest_robot_msg
-
-    # [I 2023 - 02 - 10 12: 21:38, 157] Trial
-    # 37
-    # finished
-    # with value: 0.6956037406972585
-    #     'robot_velocity_reduction_x': 9.95938559730452,
-    #     'robot_velocity_reduction_y': 0.08664108338657796,
-    #     'robot_process_noise_variance': 0.049930827957340065,
-    #     'robot_measurement_certainty': 0.22226391009500354,
-    #     'robot_filter_reset_time': 27, 'robot_filter_reset_distance': 1,
-    #     'robot_closest_distance_match': 'True', 'robot_transition_modifier_x': 5.0,
-    #     'robot_transition_modifier_y': 5.0}.
-    #
-    #     finished
-    #     with value: 0.6953856754826296
-    #     {'robot_velocity_reduction_x': 4.2711586741716365,
-    #     'robot_velocity_reduction_y': 0.06154432803815002,
-    #     'robot_process_noise_variance': 0.08785638419793501,
-    #     'robot_measurement_certainty': 0.7218024285964398,
-    #     'robot_filter_reset_time': 37, 'robot_filter_reset_distance': 1,
-    #     'robot_closest_distance_match': 'False',
-    #     'robot_transition_modifier_x': 5.0,
-    #     'robot_transition_modifier_y': 5.0}.
 
     def _get_transform(self,
                        header: Header,
@@ -249,14 +212,11 @@ class ObjectFilter(Node):
         if self.robot:  # Robot measurement exists
 
             # Check if robot is close enough to previous prediction:
-            # todo error [robot_filter-1] /home/hendrik/colcon_ws/build/bitbots_ball_filter/bitbots_ball_filter/robot_filter.py:325: ComplexWarning: Casting complex values to real discards the imaginary part
             distance_to_robot = math.dist(
                (self.kf.get_update()[0][0], self.kf.get_update()[0][1]), self.get_robot_measurement())
             if self.filter_initialized and distance_to_robot > self.filter_reset_distance:
                 # Distance too large -> reset filter:
                 self.filter_initialized = False
-                #self.logger.info(
-                 #   f"Reset filter! Reason: Distance to robot {distance_to_robot} > {self.filter_reset_distance} (filter_reset_distance)")
 
             # Initialize filter if not already
             if not self.filter_initialized:
@@ -278,8 +238,6 @@ class ObjectFilter(Node):
                 age = self.get_clock().now() - rclpy.time.Time.from_msg(self.last_robot_stamp)
                 if not self.last_robot_stamp or age > self.filter_reset_duration:
                     self.filter_initialized = False
-                    #self.logger.info(
-                     #   f"Reset filter! Reason: Latest robot is too old {age} > {self.filter_reset_duration} (filter_reset_duration)")
                     return
                 # Empty update, as no new measurement available (and not too old)
 
@@ -290,8 +248,6 @@ class ObjectFilter(Node):
                 self.publish_data(*self.kf.get_update())
 
             else:  # Publish old state with huge covariance
-                # todo: I don't understand this. How can we use the kf if its not initialized
-                #  and do these values need to be optimized? specifically the covariance
                 state_vec, cov_mat = self.kf.get_update()
                 huge_cov_mat = np.eye(cov_mat.shape[0]) * 10
                 self.publish_data(state_vec, huge_cov_mat)
