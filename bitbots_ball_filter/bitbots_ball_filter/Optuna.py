@@ -519,6 +519,7 @@ if __name__ == '__main__':
 
     # save best parameter values to output file:
     best_params = study.best_params
+    best_value = study.best_value
     with open('output_data2.json', 'r') as file:
         output_data = json.load(file)
     file.close()
@@ -560,6 +561,7 @@ if __name__ == '__main__':
             'noise_array': noise_array,
             'failed_trial_params': failed_trial_array,
             'average_error_array': average_error_array,
+            'best_value': best_value,
             'parameters': parameters
         }
         output_data['study_outputs'].append(trial_output)

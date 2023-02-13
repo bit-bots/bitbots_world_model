@@ -46,6 +46,7 @@ class ObjectFilter(Node):
         self.robot = None
         self.filter_initialized = False
         self.cycle = 0
+        self.optimizing = False
 
         warnings.filterwarnings('ignore')  # ignore complex warnings
 
@@ -68,18 +69,20 @@ class ObjectFilter(Node):
             tmp_config[param.name] = param.value
         config = tmp_config
 
-        with open('text_params.txt', 'r') as file:
-            adjusted_params = file.read().split('#')
-        file.close()
-        i = 0
-        while i < len(adjusted_params) - 1:  # the list has one empty element in the back we don't need
-            temp = adjusted_params[i+1]
-            try:
-                temp = float(adjusted_params[i+1])
-            except:
-                pass
-            config[str(adjusted_params[i])] = temp
-            i += 2
+
+        if self.optimizing:
+            with open('text_params.txt', 'r') as file:
+                adjusted_params = file.read().split('#')
+            file.close()
+            i = 0
+            while i < len(adjusted_params) - 1:  # the list has one empty element in the back we don't need
+                temp = adjusted_params[i+1]
+                try:
+                    temp = float(adjusted_params[i+1])
+                except:
+                    pass
+                config[str(adjusted_params[i])] = temp
+                i += 2
 
         num_state_vars = 4  # 2 for position, 1 for direction and 1 for velocity
         num_measurement_inputs = 2

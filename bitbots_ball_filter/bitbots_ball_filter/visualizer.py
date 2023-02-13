@@ -4,7 +4,9 @@ from matplotlib.colors import ListedColormap, LinearSegmentedColormap
 from rclpy.node import Node
 import rclpy
 import math
+from statistics import mean
 import random
+import argparse
 import json
 import numpy as np
 from soccer_vision_3d_msgs.msg import RobotArray
@@ -39,21 +41,24 @@ class Visualizer(Node):
         self.detected_position_y_array = []
         self.filtered_position_x_array = []
         self.filtered_position_y_array = []
+        self.file_numbers = [1]
         self.array_error = []
         self.max_length = 1000
         self.use_noise_data = False
         self.noise_array = []
         self.noise_array_counter = 0
-        self.trial_number = -1
+        self.study_number = -1
         # mwn comparison
         #self.trial_array = [36, 35, 37] # 1000 2
         #self.trial_array = [39, 38, 40] # 100 2
         #self.trial_array = [42, 41, 43] # 1000 0.5
-        self.trial_array = [45, 44, 46] # 100 0.5
+        #self.trial_array = [45, 44, 46] # 100 0.5
+        self.study_array = [study_number]
         self.unfinished_truth = True
         self.unfinished_filtered = True
         self.unfinished_detected = True
         self.output_data = None
+        self.pls_plot = True
 
         # setup mathplotlib stuff
         # plt.rcParams["figure.figsize"] = [7.50, 3.50]
@@ -96,7 +101,8 @@ class Visualizer(Node):
         #          lw=1.5,
         #          c='black')
 
-        #self.plot_average_error()
+        # self.plot_average_error()
+        #self.calc_averages()
 
 
 
@@ -104,18 +110,40 @@ class Visualizer(Node):
         # self.unfinished_filtered = False
         # self.unfinished_truth = False
         # self.unfinished_detected = False
+        # self.dont_plot = True
+
+    def calc_averages(self):
+        global_average_error_array = []
+        global_average_time_array = []
+        for file_num in self.file_numbers:
+            with open('output_data{}.json'.format(file_num), 'r') as f1:
+                self.output_data = json.load(f1)
+            f1.close()
+            for study_num in self.study_array:
+                for study in self.output_data['study_outputs']:
+                    if study['study_number'] == study_num:
+                        temp1 = 999
+                        error = 0
+                        for error in study['average_error_array']:
+                            if error > 0:
+                                if error < temp1:
+                                    temp1 = error
+                        global_average_error_array[study_num] += error
+                        global_average_time_array[study_num] += study['time']
+        print("error: {}".format(mean(global_average_error_array)))
+        print("time: {}".format(mean(global_average_time_array)))
 
     def plot_average_error(self):
         temp = 0
-        for study_num in self.trial_array:
+        for study_num in self.study_array:
 
-            with open('output_data.json', 'r') as f1:
+            with open('output_data2.json', 'r') as f1:
                 self.output_data = json.load(f1)
             f1.close()
-            if self.trial_number == -1 or self.trial_number > len(self.output_data['study_outputs']) - 1:
+            if self.study_number == -1 or self.study_number > len(self.output_data['study_outputs']) - 1:
                 trial = self.output_data['study_outputs'][study_num]
             else:
-                trial = self.output_data['study_outputs'][self.trial_number]
+                trial = self.output_data['study_outputs'][self.study_number]
             self.noise_array = trial['noise_array']
             if len(self.noise_array) == 0:
                 self.use_noise_data = False
@@ -141,6 +169,9 @@ class Visualizer(Node):
             #             lw=1.5
             #         )
 
+            print("best value: {}".format(min(average_error_array_y)))
+            print("time: {}".format(trial['time']))
+
             if temp == 0:
                 color = 'red'
                 label = 'wide parameter space'
@@ -159,14 +190,14 @@ class Visualizer(Node):
             print("min for {}: {}".format(study_num, min(average_error_array_y)))
             print("convergence for {}: {}".format(study_num, self.estimate_q(average_error_array_y)))
 
-        plt.yscale('log')
-        #plt.xscale('log')
-        plt.xlabel('Trial')
-        plt.ylabel('Average Error')
-        plt.title('')
-        plt.legend()
-        plt.savefig('100gbu05.pdf')
-        plt.show()
+        # plt.yscale('log')
+        # #plt.xscale('log')
+        # plt.xlabel('Trial')
+        # plt.ylabel('Average Error')
+        # plt.title('')
+        # plt.legend()
+        # plt.savefig('100gbu05.pdf')
+        # plt.show()
 
     def estimate_q(self, eps):
         """
@@ -238,49 +269,50 @@ class Visualizer(Node):
 
 
     def plot(self):
-        print('plotting...')
+        if self.pls_plot:
+            print('plotting...')
 
-        plt.plot(self.detected_position_x_array, self.detected_position_y_array,
-                 label='detected',
-                 lw=1.0,
-                 c="silver")
+            plt.plot(self.detected_position_x_array, self.detected_position_y_array,
+                     label='detected',
+                     lw=1.0,
+                     c="silver")
 
 
-        norm = mpl.colors.Normalize(vmin=0, vmax=0.5)
-        color_map = mpl.colormaps['RdYlGn_r']  #.resampled(8)
-        total_error_sum = 0
-        for i in range(0, len(self.filtered_position_x_array) - 4):
-            error_sum = 0
-            total_error_sum += self.array_error[i]
-            print(total_error_sum)
-            for error in self.array_error[i:i+2]:
-                error_sum += error
-            color = color_map(norm(error_sum / 2))
-            # self.ax.plot(
-            #     self.filtered_position_x_array[i:i + 2],
-            #     self.filtered_position_y_array[i:i + 2],
-            #     c=color,
-            #     lw=3
-            # )
-        print(len(self.filtered_position_x_array))
-        print("average error: {}".format(total_error_sum / (len(self.filtered_position_x_array) - 4)))
+            norm = mpl.colors.Normalize(vmin=0, vmax=0.5)
+            color_map = mpl.colormaps['RdYlGn_r']  #.resampled(8)
+            total_error_sum = 0
+            for i in range(0, len(self.filtered_position_x_array) - 4):
+                error_sum = 0
+                total_error_sum += self.array_error[i]
+                print(total_error_sum)
+                for error in self.array_error[i:i+2]:
+                    error_sum += error
+                color = color_map(norm(error_sum / 2))
+                # self.ax.plot(
+                #     self.filtered_position_x_array[i:i + 2],
+                #     self.filtered_position_y_array[i:i + 2],
+                #     c=color,
+                #     lw=3
+                # )
+            print(len(self.filtered_position_x_array))
+            print("average error: {}".format(total_error_sum / (len(self.filtered_position_x_array) - 4)))
 
-        plt.plot(self.groundtruth_position_x_array, self.groundtruth_position_y_array,
-                 label='ground truth',
-                 lw=1.5,
-                 c="black")
+            plt.plot(self.groundtruth_position_x_array, self.groundtruth_position_y_array,
+                     label='ground truth',
+                     lw=1.5,
+                     c="black")
 
-        print('finished filtered')
+            print('finished filtered')
 
-        # plot error
-        # plt.plot(self.array_position_filtered_x, self.array_position_filtered_y, label='filtered')
+            # plot error
+            # plt.plot(self.array_position_filtered_x, self.array_position_filtered_y, label='filtered')
 
-        plt.xlabel('x - axis')
-        plt.ylabel('y - axis')
-        plt.title('Robot Position')
-        plt.legend()
-        plt.savefig('example.pdf')
-        plt.show()
+            plt.xlabel('x - axis')
+            plt.ylabel('y - axis')
+            plt.title('Robot Position')
+            plt.legend()
+            plt.savefig('example.pdf')
+            plt.show()
 
     def is_truth_unfinished(self):
         return self.unfinished_truth
@@ -311,4 +343,13 @@ def main(args=None):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser('Optimizes parameters of a tracking filter')
+    parser.add_argument(
+        '--study',
+        type=int,
+        default='1',
+        help='number of study'
+    )
+    args = parser.parse_args()
+    study_number = args.study
     main()
