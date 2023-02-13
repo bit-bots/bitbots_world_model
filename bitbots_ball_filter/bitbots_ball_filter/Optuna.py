@@ -36,7 +36,9 @@ class TrialOptimizer(Node):
         self.error_test_array = error_test_array
 
         self.robot_groundtruth_msg_queue = robot_position_true_queue.copy()
+        self.robot_groundtruth_msg_queue.extend(robot_position_true_queue.copy()) #todo remove
         self.robot_detection_msg_queue = robot_msg_err_queue.copy()
+        self.robot_detection_msg_queue.extend(robot_msg_err_queue.copy()) #todo remove
         self.current_robot_groundtruth_position = None
         self.current_robot_groundtruth_msg = self.robot_groundtruth_msg_queue.pop(0)[1]
         self.current_robot_detection_msg = self.robot_detection_msg_queue.pop(0)[1]
