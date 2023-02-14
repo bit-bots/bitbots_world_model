@@ -46,7 +46,7 @@ class ObjectFilter(Node):
         self.robot = None
         self.filter_initialized = False
         self.cycle = 0
-        self.optimizing = False
+        self.optimizing = True
 
         warnings.filterwarnings('ignore')  # ignore complex warnings
 
@@ -92,6 +92,7 @@ class ObjectFilter(Node):
 
         # additional setup:
         self.trial_number = config['trial_number']
+        self.logger.warn("trial number: {}".format(self.trial_number))
         self.selfdestruct = config['selfdestruct']
         self.tf_buffer = tf2.Buffer(cache_time=rclpy.duration.Duration(seconds=2))
         self.tf_listener = tf2.TransformListener(self.tf_buffer, self)
