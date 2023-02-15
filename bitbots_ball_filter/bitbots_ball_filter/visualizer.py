@@ -262,7 +262,7 @@ class Visualizer(Node):
             error_sum = 0
             total_error_sum += self.array_error[i]
             for error in self.array_error[i:i+2]:
-                error_sum += error
+                error_sum += error ** 2
             color = color_map(norm(error_sum / 2))
             # self.ax.plot(
             #     self.filtered_position_x_array[i:i + 2],
@@ -271,7 +271,7 @@ class Visualizer(Node):
             #     lw=3
             # )
         print(len(self.filtered_position_x_array))
-        output_text = "average error: {}".format(total_error_sum / (len(self.filtered_position_x_array) - 4))
+        output_text = "average error: {}".format(math.sqrt(total_error_sum / (len(self.filtered_position_x_array))))
         print(output_text)
 
         plt.plot(self.groundtruth_position_x_array, self.groundtruth_position_y_array,
